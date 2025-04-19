@@ -259,7 +259,8 @@ export default function TerminalChatInput({
         clearTerminal();
 
         // Print a clear confirmation and reset conversation items.
-        console.log('Context cleared');
+        // eslint-disable-next-line no-console
+        console.log("Context cleared");
         setItems([
           {
             id: `clear-${Date.now()}`,

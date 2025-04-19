@@ -39,7 +39,7 @@ describe("/clear command", () => {
         role: "system",
         content: [{ type: "input_text", text: "Old item" }],
       },
-    ] as any[];
+    ] as Array<any>;
 
     const props: ComponentProps<typeof TerminalChatInput> = {
       isNew: false,
