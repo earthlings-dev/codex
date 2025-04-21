@@ -318,7 +318,20 @@ export default function TerminalChatInput({
 
       if (inputValue.startsWith("/model")) {
         setInput("");
-        openModelOverlay();
+        const modelArg = inputValue.substring(6).trim();
+        if (modelArg) {
+          // If there's an argument after "/model", treat it as a direct model selection
+          submitInput([
+            {
+              role: "user",
+              content: [{ type: "input_text", text: inputValue }],
+              type: "message",
+            },
+          ]);
+        } else {
+          // No argument, open the model selection overlay
+          openModelOverlay();
+        }
         return;
       }
 
