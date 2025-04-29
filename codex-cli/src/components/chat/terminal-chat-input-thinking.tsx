@@ -1,4 +1,4 @@
-import { log } from "../../utils/agent/log.js";
+import { log } from "../../utils/logger/log.js";
 import { Box, Text, useInput, useStdin } from "ink";
 import React, { useState } from "react";
 import { useInterval } from "use-interval";
@@ -106,11 +106,16 @@ export default function TerminalChatInputThinking({
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box gap={2}>
-        <Text>{frameWithSeconds}</Text>
+      <Box justifyContent="space-between">
+        <Box gap={2}>
+          <Text>{frameWithSeconds}</Text>
+          <Text>
+            Thinking
+            {dots}
+          </Text>
+        </Box>
         <Text>
-          Thinking
-          {dots}
+          Press <Text bold>Esc</Text> twice to interrupt
         </Text>
       </Box>
       {awaitingConfirm && (

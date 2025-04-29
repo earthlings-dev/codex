@@ -117,7 +117,7 @@ function TerminalChatResponseMessage({
       const systemMessage = message.content.find(
         (c) => c.type === "input_text",
       )?.text;
-      if (systemMessage?.includes("has been deprecated")) {
+      if (systemMessage?.includes("model_not_found")) {
         setOverlayMode?.("model");
       }
     }
@@ -135,14 +135,14 @@ function TerminalChatResponseMessage({
               c.type === "output_text"
                 ? c.text
                 : c.type === "refusal"
-                ? c.refusal
-                : c.type === "input_text"
-                ? c.text
-                : c.type === "input_image"
-                ? "<Image>"
-                : c.type === "input_file"
-                ? c.filename
-                : "", // unknown content type
+                  ? c.refusal
+                  : c.type === "input_text"
+                    ? c.text
+                    : c.type === "input_image"
+                      ? "<Image>"
+                      : c.type === "input_file"
+                        ? c.filename
+                        : "", // unknown content type
           )
           .join(" ")}
       </Markdown>
