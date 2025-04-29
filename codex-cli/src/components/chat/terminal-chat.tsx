@@ -562,11 +562,13 @@ export default function TerminalChat({
             submitInput={(inputs) => {
               // Check if this is a model switch command
               const input = inputs[0];
-              if (input.type === "message" && input.role === "user" && 
-                  input.content[0].type === "input_text" && 
-                  typeof input.content[0].text === "string" &&
-                  input.content[0].text.startsWith("/model ")) {
-                
+              if (
+                input.type === "message" &&
+                input.role === "user" &&
+                input.content[0].type === "input_text" &&
+                typeof input.content[0].text === "string" &&
+                input.content[0].text.startsWith("/model ")
+              ) {
                 const modelName = input.content[0].text.substring(7).trim();
                 // Check if there's already a response in the conversation
                 if (lastResponseId && modelName !== model) {
@@ -586,19 +588,21 @@ export default function TerminalChat({
                   ]);
                   return;
                 }
-                
+
                 // Validate the model
-                getAvailableModels().then(models => {
+                getAvailableModels().then((models) => {
                   // Always allow recommended models even if they're not in the returned list
                   const isRecommended = RECOMMENDED_MODELS.includes(modelName);
-                  
+
                   if (models.includes(modelName) || isRecommended) {
                     // Switch model
                     agent?.cancel();
                     setLoading(false);
                     setModel(modelName);
-                    setLastResponseId((prev) => prev && modelName !== model ? null : prev);
-                    
+                    setLastResponseId((prev) =>
+                      prev && modelName !== model ? null : prev,
+                    );
+
                     setItems((prev) => [
                       ...prev,
                       {
