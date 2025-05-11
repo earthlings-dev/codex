@@ -333,7 +333,9 @@ export type SafeCommandReason = {
 export function isSafeCommand(
   command: ReadonlyArray<string>,
 ): SafeCommandReason | null {
-  const [cmd0, cmd1, cmd2, cmd3] = command;
+  // Trim out any whitespace‑only tokens so leading spaces don’t break matching
+  const tokens = command.map((t) => t.trim()).filter((t) => t !== "");
+  const [cmd0, cmd1, cmd2, cmd3] = tokens;
 
   switch (cmd0) {
     case "cd":
@@ -361,6 +363,11 @@ export function isSafeCommand(
     case "cat":
       return {
         reason: "View file contents",
+        group: "Reading files",
+      };
+    case "nl":
+      return {
+        reason: "View file with line numbers",
         group: "Reading files",
       };
     case "rg":

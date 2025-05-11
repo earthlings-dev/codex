@@ -10,12 +10,14 @@ import type {
 } from "openai/resources/responses/responses";
 
 import { useTerminalSize } from "../../hooks/use-terminal-size";
+import { loadConfig } from "../../utils/config.js";
 import { collapseXmlBlocks } from "../../utils/file-tag-utils";
 import { parseToolCall, parseToolCallOutput } from "../../utils/parsers";
 import chalk, { type ForegroundColorName } from "chalk";
 import { Box, Text } from "ink";
 import { parse, setOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
+import path from "path";
 import React, { useEffect, useMemo } from "react";
 
 export default function TerminalChatResponseItem({
@@ -128,9 +130,14 @@ function TerminalChatResponseMessage({
     <Box flexDirection="column">
       <Text bold color={colorsByRole[message.role] || "gray"}>
         {message.role === "assistant" ? "codex" : message.role}
-        {message.role === "assistant" && (message as any).duration_s != null && (
-          <Text dimColor> ({(message as any).duration_s}s)</Text>
-        )}
+        {message.role === "assistant" &&
+          (message as unknown as { duration_s?: number }).duration_s !=
+            null && (
+            <Text dimColor>
+              {" "}
+              ({(message as unknown as { duration_s?: number }).duration_s}s)
+            </Text>
+          )}
       </Text>
       <Markdown>
         {message.content
@@ -252,12 +259,32 @@ export function Markdown({
   const size = useTerminalSize();
 
   const rendered = React.useMemo(() => {
+    // Transform file citations into markdown links based on editor setting
+    const cfg = loadConfig();
+    const editor = cfg.editor;
+    const citationRegex = /【F:([^†]+)†L(\d+)(?:-L(\d+|\?))?】/g;
+    const transformed = children.replace(
+      citationRegex,
+      (_match, file, start, end) => {
+        const absPath = path.resolve(process.cwd(), file);
+        const label =
+          end === "?"
+            ? `${file}:${start}-?`
+            : `${file}:${start}${end ? `-${end}` : ``}`;
+        const url =
+          editor === "vscode"
+            ? `vscode://file/${absPath}:${start}`
+            : `cursor://file${absPath}:${start}`;
+        // ANSI hyperlink: ESC ] 8 ;; url ESC \ label ESC ] 8 ;; ESC \
+        return `\u001b]8;;${url}\u001b\\${label}\u001b]8;;\u001b\\`;
+      },
+    );
     // Configure marked for this specific render
     setOptions({
       // @ts-expect-error missing parser, space props
       renderer: new TerminalRenderer({ ...options, width: size.columns }),
     });
-    const parsed = parse(children, { async: false }).trim();
+    const parsed = parse(transformed, { async: false }).trim();
 
     // Remove the truncation logic
     return parsed;

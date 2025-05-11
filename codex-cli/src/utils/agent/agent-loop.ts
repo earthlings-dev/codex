@@ -30,9 +30,11 @@ import {
   setSessionId,
 } from "../session.js";
 import { handleExecCommand } from "./handle-exec-command.js";
+import { spawnSync } from "child_process";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { randomUUID } from "node:crypto";
 import OpenAI, { APIConnectionTimeoutError, AzureOpenAI } from "openai";
+import os from "os";
 
 // Wait time before retrying after rate limit errors (ms).
 const RATE_LIMIT_RETRY_WAIT_MS = parseInt(
@@ -967,7 +969,8 @@ export class AgentLoop {
                 } else {
                   // attach per-turn elapsed time (in seconds) to the assistant message
                   if (item.type === "message" && item.role === "assistant") {
-                    (item as any).duration_s = Math.round((Date.now() - thinkingStart) / 1000);
+                    (item as unknown as { duration_s?: number }).duration_s =
+                      Math.round((Date.now() - thinkingStart) / 1000);
                   }
                   stageItem(item as ResponseItem);
                 }
@@ -1452,7 +1455,22 @@ export class AgentLoop {
   }
 }
 
-const prefix = `You are operating as and within the Codex CLI, a terminal-based agentic coding assistant built by OpenAI. It wraps OpenAI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+// Dynamic developer message prefix: includes user, workdir, and rg suggestion.
+const userName = os.userInfo().username;
+const workdir = process.cwd();
+const dynamicLines: Array<string> = [
+  `User: ${userName}`,
+  `Workdir: ${workdir}`,
+];
+if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0) {
+  dynamicLines.unshift(
+    "- Always use rg instead of grep/ls -R because it is much faster and respects gitignore",
+  );
+}
+const dynamicPrefix = dynamicLines.join("\n") + "\n\n";
+const prefix =
+  dynamicPrefix +
+  `You are operating as and within the Codex CLI, a terminal-based agentic coding assistant built by OpenAI. It wraps OpenAI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
 You can:
 - Receive user prompts, project context, and files.

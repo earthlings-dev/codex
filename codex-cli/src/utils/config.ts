@@ -161,6 +161,7 @@ export type StoredConfig = {
   /** User-defined safe commands */
   safeCommands?: Array<string>;
   reasoningEffort?: ReasoningEffort;
+  editor?: "cursor" | "vscode" | "windsurf";
 };
 
 // Minimal config written on first run.  An *empty* model string ensures that
@@ -193,6 +194,8 @@ export type AppConfig = {
 
   /** Enable the "flex-mode" processing mode for supported models (o3, o4-mini) */
   flexMode?: boolean;
+  /** Editor for opening file citations */
+  editor?: "cursor" | "vscode" | "windsurf";
   providers?: Record<string, { name: string; baseURL: string; envKey: string }>;
   history?: {
     maxSize: number;
@@ -417,6 +420,8 @@ export const loadConfig = (
     },
     disableResponseStorage: storedConfig.disableResponseStorage === true,
     reasoningEffort: storedConfig.reasoningEffort,
+    // Editor setting for opening file citations
+    editor: storedConfig.editor ?? "vscode",
   };
 
   // -----------------------------------------------------------------------
