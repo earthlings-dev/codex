@@ -161,7 +161,7 @@ export type StoredConfig = {
   /** User-defined safe commands */
   safeCommands?: Array<string>;
   reasoningEffort?: ReasoningEffort;
-  editor?: "cursor" | "vscode" | "windsurf";
+  editor?: "vscode" | "cursor" | "windsurf";
 };
 
 // Minimal config written on first run.  An *empty* model string ensures that
@@ -421,7 +421,7 @@ export const loadConfig = (
     disableResponseStorage: storedConfig.disableResponseStorage === true,
     reasoningEffort: storedConfig.reasoningEffort,
     // Editor setting for opening file citations
-    editor: storedConfig.editor ?? "vscode",
+    editor: storedConfig.editor,
   };
 
   // -----------------------------------------------------------------------

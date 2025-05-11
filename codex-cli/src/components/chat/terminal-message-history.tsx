@@ -67,6 +67,11 @@ const TerminalMessageHistory: React.FC<TerminalMessageHistoryProps> = ({
               marginTop={
                 message.type === "message" && message.role === "user" ? 0 : 1
               }
+              marginBottom={
+                message.type === "message" && message.role === "assistant"
+                  ? 1
+                  : 0
+              }
             >
               <TerminalChatResponseItem
                 item={message}

@@ -259,7 +259,7 @@ export function Markdown({
   const size = useTerminalSize();
 
   const rendered = React.useMemo(() => {
-    // Transform file citations into markdown links based on editor setting
+    // Transform file citations into markdown links
     const cfg = loadConfig();
     const editor = cfg.editor;
     const citationRegex = /【F:([^†]+)†L(\d+)(?:-L(\d+|\?))?】/g;
@@ -267,16 +267,9 @@ export function Markdown({
       citationRegex,
       (_match, file, start, end) => {
         const absPath = path.resolve(process.cwd(), file);
-        const label =
-          end === "?"
-            ? `${file}:${start}-?`
-            : `${file}:${start}${end ? `-${end}` : ``}`;
-        const url =
-          editor === "vscode"
-            ? `vscode://file/${absPath}:${start}`
-            : `cursor://file${absPath}:${start}`;
-        // ANSI hyperlink: ESC ] 8 ;; url ESC \ label ESC ] 8 ;; ESC \
-        return `\u001b]8;;${url}\u001b\\${label}\u001b]8;;\u001b\\`;
+        const label = `${file}:${start}${end && end !== "?" && start !== end ? `-${end}` : ``}`;
+        const url = editor ? `${editor}://file${absPath}:${start}` : absPath;
+        return `[${label}](${url})`;
       },
     );
     // Configure marked for this specific render
