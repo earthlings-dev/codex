@@ -19,11 +19,11 @@ import { ReviewDecision } from "./utils/agent/review";
 import { AutoApprovalMode } from "./utils/auto-approval-mode";
 import { checkForUpdates } from "./utils/check-updates";
 import {
-  getApiKey,
   loadConfig,
   PRETTY_PRINT,
   INSTRUCTIONS_FILEPATH,
 } from "./utils/config";
+import { getApiKey as fetchApiKey } from "./utils/get_api_key";
 import { createInputItem } from "./utils/input-utils";
 import { initLogger } from "./utils/logger/log";
 import { isModelSupportedForResponses } from "./utils/model-utils.js";
@@ -265,7 +265,28 @@ const prompt = cli.input[0];
 const model = cli.flags.model ?? config.model;
 const imagePaths = cli.flags.image;
 const provider = cli.flags.provider ?? config.provider ?? "openai";
-const apiKey = getApiKey(provider);
+
+const oaicli_production = {
+  issuer: "https://auth.openai.com",
+  client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+};
+
+const oaicli_staging = {
+  issuer: "https://auth.api.openai.org",
+  client_id: "app_WWpKUzlOnCTqf9WmuzvqovoW",
+};
+
+const USE_PRODUCTION = true;
+const client = USE_PRODUCTION ? oaicli_production : oaicli_staging;
+
+let apiKey = "";
+
+if (!apiKey) {
+  apiKey = await fetchApiKey(client.issuer, client.client_id);
+  console.log(apiKey);
+}
+// Ensure the API key is available as an environment variable for legacy code
+process.env["OPENAI_API_KEY"] = apiKey;
 
 // Set of providers that don't require API keys
 const NO_API_KEY_REQUIRED = new Set(["ollama"]);
