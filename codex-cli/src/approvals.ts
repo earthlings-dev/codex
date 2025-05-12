@@ -453,16 +453,28 @@ export function isSafeCommand(
       }
       break;
     case "sed":
-      if (
-        cmd1 === "-n" &&
-        isValidSedNArg(cmd2) &&
-        typeof cmd3 === "string" &&
-        command.length === 4
-      ) {
-        return {
-          reason: "Sed print subset",
-          group: "Reading files",
-        };
+      // `sed -n '<range>p' [file]` is considered safe for viewing a subset of
+      // a file (or stdin when the file argument is omitted).  Historically we
+      // required the filename to be present (4 tokens), but common usage in
+      // a pipeline omits the file and streams from stdin, e.g.:
+      //   nl -ba README.md | sed -n '1,200p'
+      // Accept either form as long as:
+      //   1. The `-n` flag is provided so `sed` will not implicitly print the
+      //      entire input.
+      //   2. The address expression matches the simple `<start>,<end>p` or
+      //      `<line>p` pattern verified by `isValidSedNArg()`.
+      if (cmd1 === "-n" && isValidSedNArg(cmd2)) {
+        // Safe when invoked with exactly 3 tokens (reading from stdin) or 4
+        // tokens (explicit file path).
+        if (
+          command.length === 3 ||
+          (command.length === 4 && typeof cmd3 === "string")
+        ) {
+          return {
+            reason: "Sed print subset",
+            group: "Reading files",
+          };
+        }
       }
       break;
     default:

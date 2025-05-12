@@ -10,14 +10,12 @@ import type {
 } from "openai/resources/responses/responses";
 
 import { useTerminalSize } from "../../hooks/use-terminal-size";
-import { loadConfig } from "../../utils/config.js";
 import { collapseXmlBlocks } from "../../utils/file-tag-utils";
 import { parseToolCall, parseToolCallOutput } from "../../utils/parsers";
 import chalk, { type ForegroundColorName } from "chalk";
 import { Box, Text } from "ink";
 import { parse, setOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
-import path from "path";
 import React, { useEffect, useMemo } from "react";
 
 export default function TerminalChatResponseItem({
@@ -260,16 +258,17 @@ export function Markdown({
 
   const rendered = React.useMemo(() => {
     // Transform file citations into markdown links
-    const cfg = loadConfig();
-    const editor = cfg.editor;
+    // const cfg = loadConfig();
+    // const editor = cfg.editor;
     const citationRegex = /【F:([^†]+)†L(\d+)(?:-L(\d+|\?))?】/g;
     const transformed = children.replace(
       citationRegex,
       (_match, file, start, end) => {
-        const absPath = path.resolve(process.cwd(), file);
+        // const absPath = path.resolve(process.cwd(), file);
         const label = `${file}:${start}${end && end !== "?" && start !== end ? `-${end}` : ``}`;
-        const url = editor ? `${editor}://file${absPath}:${start}` : absPath;
-        return `[${label}](${url})`;
+        // const url = editor ? `${editor}://file${absPath}:${start}` : absPath;
+        return ` (${label})`;
+        // return `[${label}](${url})`;
       },
     );
     // Configure marked for this specific render
