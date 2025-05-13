@@ -290,7 +290,7 @@ export async function getApiKey(
         codeChallenge = pkce.code_challenge;
 
         // Build the authorization URL.
-        oidcConfig.authorization_endpoint = "http://localhost:3000/oauth/authorize";
+        // oidcConfig.authorization_endpoint = "http://localhost:3000/oauth/authorize"; // TODO(raju) remove this
         const authUrl = new URL(oidcConfig.authorization_endpoint);
         console.log("authUrl", authUrl);
         authUrl.searchParams.append("response_type", "code");
