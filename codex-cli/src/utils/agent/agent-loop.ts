@@ -16,7 +16,7 @@ import {
   OPENAI_TIMEOUT_MS,
   OPENAI_ORGANIZATION,
   OPENAI_PROJECT,
-  getApiKey,
+  // getApiKey,
   getBaseUrl,
   AZURE_OPENAI_API_VERSION,
 } from "../config.js";
@@ -301,7 +301,7 @@ export class AgentLoop {
     this.sessionId = getSessionId() || randomUUID().replaceAll("-", "");
     // Configure OpenAI client with optional timeout (ms) from environment
     const timeoutMs = OPENAI_TIMEOUT_MS;
-    const apiKey = getApiKey(this.provider);
+    const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
     const baseURL = getBaseUrl(this.provider);
 
     this.oai = new OpenAI({
@@ -686,7 +686,7 @@ export class AgentLoop {
         // prompts) and so that freshly generated `function_call_output`s are
         // shown immediately.
         // Figure out what subset of `turnInput` constitutes *new* information
-        // for the UI so that we don’t spam the interface with repeats of the
+        // for the UI so that we don't spam the interface with repeats of the
         // entire transcript on every iteration when response storage is
         // disabled.
         const deltaInput = this.disableResponseStorage
