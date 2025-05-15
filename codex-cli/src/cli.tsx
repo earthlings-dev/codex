@@ -23,7 +23,7 @@ import {
   PRETTY_PRINT,
   INSTRUCTIONS_FILEPATH,
 } from "./utils/config";
-import { getApiKey as fetchApiKey } from "./utils/get_api_key";
+import { getApiKey as fetchApiKey } from "./utils/get-api-key";
 import { createInputItem } from "./utils/input-utils";
 import { initLogger } from "./utils/logger/log";
 import { isModelSupportedForResponses } from "./utils/model-utils.js";
