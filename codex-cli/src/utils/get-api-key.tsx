@@ -167,10 +167,11 @@ async function handleCallback(
     body: exchangeParams.toString(),
   });
   if (!exchangeRes.ok) {
-    throw new Error("Failed to create API key");
+    throw new Error(`Failed to create API key: ${await exchangeRes.text()}`);
   }
 
-  const { key } = (await exchangeRes.json()) as { key: string };
+  const exchanged = (await exchangeRes.json()) as { key: string };
+  const { key } = exchanged;
 
   // Determine whether the organization still requires additional
   // setup (e.g., adding a payment method) based on the ID-token
@@ -206,7 +207,10 @@ async function handleCallback(
   successUrl.searchParams.set("plan_type", chatgptPlanType);
   res.redirect(successUrl.toString());
 
-  return key;
+  // eslint-disable-next-line no-console
+  console.log("exchanged:", exchanged);
+
+  return key || tokenData.access_token;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,25 +239,21 @@ const LOGIN_SUCCESS_HTML = String.raw`
 
     <style>
       .container {
-        margin: 0 auto;
-        width: 1280px;
-        height: 100vh;
+        margin: auto;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         position: relative;
         background: white;
-        overflow: hidden;
-        border-bottom-right-radius: 10px;
-        border-bottom-left-radius: 10px;
-        font-family: 'SF Pro';
+        font-family: 'SF Pro', 'Helvetica Neue', sans-serif;
       }
       .inner-container {
         width: 400px;
-        left: 440px;
-        top: 292px;
-        position: absolute;
         flex-direction: column;
         justify-content: flex-start;
         align-items: center;
-        gap: 28px;
+        gap: 20px;
         display: inline-flex;
       }
       .content {
@@ -362,9 +362,7 @@ const LOGIN_SUCCESS_HTML = String.raw`
           <div class="title">Signed in to Codex CLI</div>
         </div>
         <div class="close-box" style="display: none;">
-          <a href="javascript:window.close()" data-hasendicon="false" data-hasstarticon="false" data-ishovered="false" data-isinactive="false" data-ispressed="false" data-size="large" data-type="primary" class="close-button">
-            <div class="close-text">Close this tab</div>
-          </a>
+          <div class="setup-description">You may now close this page</div>
         </div>
         <div class="setup-box" style="display: none;">
           <div class="setup-content">
@@ -435,8 +433,15 @@ async function signInFlow(issuer: string, clientId: string): Promise<string> {
   const state = crypto.randomBytes(32).toString("hex");
 
   const apiKeyPromise = new Promise<string>((resolve, reject) => {
+    let _apiKey: string | undefined;
+
     app.get("/success", (_req: Request, res: Response) => {
       res.type("text/html").send(LOGIN_SUCCESS_HTML);
+      if (_apiKey) {
+        resolve(_apiKey);
+      } else {
+        reject(new Error("No API key found"));
+      }
     });
 
     // Callback route -------------------------------------------------------
@@ -455,7 +460,7 @@ async function signInFlow(issuer: string, clientId: string): Promise<string> {
           redirectUri,
           state,
         );
-        resolve(apiKey);
+        _apiKey = apiKey;
       } catch (err) {
         reject(err);
       }

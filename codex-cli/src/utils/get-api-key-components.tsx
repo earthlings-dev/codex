@@ -19,8 +19,9 @@ export function ApiKeyPrompt({
       <Box flexDirection="column">
         <Text>
           Sign in with ChatGPT to generate an API key or paste one you already
-          have. [Use arrows to move, Enter to select]
+          have.
         </Text>
+        <Text dimColor>[use arrows to move, enter to select]</Text>
         <SelectInput
           items={[
             { label: "Sign in with ChatGPT", value: "signin" },
