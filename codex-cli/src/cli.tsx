@@ -23,7 +23,7 @@ import {
   PRETTY_PRINT,
   INSTRUCTIONS_FILEPATH,
 } from "./utils/config";
-import { getApiKey as fetchApiKey } from "./utils/get_api_key";
+import { getApiKey as fetchApiKey } from "./utils/get-api-key";
 import { createInputItem } from "./utils/input-utils";
 import { initLogger } from "./utils/logger/log";
 import { isModelSupportedForResponses } from "./utils/model-utils.js";
@@ -276,14 +276,14 @@ const oaicli_staging = {
   client_id: "app_WWpKUzlOnCTqf9WmuzvqovoW",
 };
 
-const USE_PRODUCTION = true;
+const USE_PRODUCTION = false;
+
 const client = USE_PRODUCTION ? oaicli_production : oaicli_staging;
 
 let apiKey = "";
 
 if (!apiKey) {
   apiKey = await fetchApiKey(client.issuer, client.client_id);
-  console.log(apiKey);
 }
 // Ensure the API key is available as an environment variable for legacy code
 process.env["OPENAI_API_KEY"] = apiKey;

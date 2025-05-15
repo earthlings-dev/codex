@@ -15,7 +15,6 @@ import {
   OPENAI_TIMEOUT_MS,
   OPENAI_ORGANIZATION,
   OPENAI_PROJECT,
-  getApiKey,
   getBaseUrl,
   AZURE_OPENAI_API_VERSION,
 } from "../config.js";
