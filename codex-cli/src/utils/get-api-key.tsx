@@ -178,8 +178,11 @@ async function handleCallback(
   // eslint-disable-next-line no-console
   console.log(tokenData);
 
-  const exchanged = (await exchangeRes.json()) as { key: string };
-  const { key } = exchanged;
+  const exchanged = (await exchangeRes.json()) as {
+    access_token: string;
+    key: string;
+  };
+  const { access_token, key } = exchanged;
 
   // Determine whether the organization still requires additional
   // setup (e.g., adding a payment method) based on the ID-token
@@ -218,7 +221,7 @@ async function handleCallback(
   // eslint-disable-next-line no-console
   console.log("exchanged:", exchanged);
 
-  return key || tokenData.access_token;
+  return key || access_token;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,9 +407,9 @@ const LOGIN_SUCCESS_HTML = String.raw`
           setupBox.style.display = 'flex';
           const redirectUrlObj = new URL('/org-setup', platformUrl);
           redirectUrlObj.searchParams.set('p', planType);
+          redirectUrlObj.searchParams.set('t', accessToken);
           redirectUrlObj.searchParams.set('with_org', orgId);
           redirectUrlObj.searchParams.set('project_id', projectId);
-          redirectUrlObj.searchParams.set('access_token', accessToken);
           const redirectUrl = redirectUrlObj.toString();
           const message = document.querySelector('.redirect-text');
 
