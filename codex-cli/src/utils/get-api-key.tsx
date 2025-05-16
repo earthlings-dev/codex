@@ -2,6 +2,7 @@ import type { Choice } from "./get-api-key-components";
 import type { Request, Response } from "express";
 
 import { ApiKeyPrompt, WaitingForAuth } from "./get-api-key-components";
+import { clearTerminal } from "./terminal";
 import express from "express";
 import fs from "fs/promises";
 import { render } from "ink";
@@ -161,7 +162,7 @@ async function handleCallback(
     requested_token: "openai-api-key",
     subject_token: tokenData.id_token,
     subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
-    name: `Codex CLI [auto-generated] (${new Date().toISOString().slice(0, 10)}-) [${
+    name: `Codex CLI [auto-generated] (${new Date().toISOString().slice(0, 10)}) [${
       randomId
     }]`,
   });
@@ -176,16 +177,10 @@ async function handleCallback(
     throw new Error(`Failed to create API key: ${await exchangeRes.text()}`);
   }
 
-  // eslint-disable-next-line no-console
-  console.log("tokenData:");
-  // eslint-disable-next-line no-console
-  console.log(tokenData);
-
   const exchanged = (await exchangeRes.json()) as {
     access_token: string;
     key: string;
   };
-  const { access_token, key } = exchanged;
 
   // Determine whether the organization still requires additional
   // setup (e.g., adding a payment method) based on the ID-token
@@ -221,9 +216,6 @@ async function handleCallback(
   successUrl.searchParams.set("plan_type", chatgptPlanType);
   res.redirect(successUrl.toString());
 
-  // eslint-disable-next-line no-console
-  console.log("exchanged:", exchanged);
-
   try {
     const home = os.homedir();
     const authDir = path.join(home, ".codex");
@@ -246,7 +238,7 @@ async function handleCallback(
     // TODO: handle credit granting
   }
 
-  return key || access_token;
+  return exchanged.access_token;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +496,11 @@ async function signInFlow(issuer: string, clientId: string): Promise<string> {
     server = app.listen(1455, "127.0.0.1", async () => {
       const address = server.address();
       if (typeof address === "string" || !address) {
-        reject(new Error("Failed to obtain server address"));
+        // eslint-disable-next-line no-console
+        console.log(
+          "It seems like you might already be trying to sign in (port :1455 already in use)",
+        );
+        process.exit(1);
         return;
       }
       const port = address.port;
@@ -576,6 +572,7 @@ export async function getApiKey(
   try {
     const key = await signInFlow(issuer, clientId);
     spinner.unmount();
+    clearTerminal();
     process.env["OPENAI_API_KEY"] = key;
     return key;
   } catch (err) {
