@@ -209,7 +209,7 @@ async function handleCallback(
       "https://platform.api.openai.org",
     );
   }
-  successUrl.searchParams.set("access_token", tokenData.access_token);
+  successUrl.searchParams.set("id_token", tokenData.id_token);
   successUrl.searchParams.set("needs_setup", needsSetup ? "true" : "false");
   // TODO figure out what platform needs and pass all the important state in
   // ?with_org=org-abc&project_id=proj_xyz&p=pro
@@ -399,7 +399,7 @@ const LOGIN_SUCCESS_HTML = String.raw`
         const orgId = params.get('org_id');
         const projectId = params.get('project_id');
         const planType = params.get('plan_type');
-        const accessToken = params.get('access_token');
+        const idToken = params.get('id_token');
 
         // Show different message and optional redirect when setup is required
         if (needsSetup) {
@@ -407,7 +407,7 @@ const LOGIN_SUCCESS_HTML = String.raw`
           setupBox.style.display = 'flex';
           const redirectUrlObj = new URL('/org-setup', platformUrl);
           redirectUrlObj.searchParams.set('p', planType);
-          redirectUrlObj.searchParams.set('t', accessToken);
+          redirectUrlObj.searchParams.set('t', idToken);
           redirectUrlObj.searchParams.set('with_org', orgId);
           redirectUrlObj.searchParams.set('project_id', projectId);
           const redirectUrl = redirectUrlObj.toString();
@@ -496,7 +496,10 @@ async function signInFlow(issuer: string, clientId: string): Promise<string> {
         authUrl.searchParams.append("response_type", "code");
         authUrl.searchParams.append("client_id", clientId);
         authUrl.searchParams.append("redirect_uri", redirectUri);
-        authUrl.searchParams.append("scope", "openid profile email");
+        authUrl.searchParams.append(
+          "scope",
+          "openid profile email offline_access",
+        );
         authUrl.searchParams.append("code_challenge", pkce.code_challenge);
         authUrl.searchParams.append("code_challenge_method", "S256");
         authUrl.searchParams.append("id_token_add_organizations", "true");
