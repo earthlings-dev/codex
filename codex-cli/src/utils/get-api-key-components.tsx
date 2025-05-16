@@ -16,12 +16,14 @@ export function ApiKeyPrompt({
 
   if (step === "select") {
     return (
-      <Box flexDirection="column">
-        <Text>
-          Sign in with ChatGPT to generate an API key or paste one you already
-          have.
-        </Text>
-        <Text dimColor>[use arrows to move, enter to select]</Text>
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Text>
+            Sign in with ChatGPT to generate an API key or paste one you already
+            have.
+          </Text>
+          <Text dimColor>[use arrows to move, enter to select]</Text>
+        </Box>
         <SelectInput
           items={[
             { label: "Sign in with ChatGPT", value: "signin" },
@@ -62,7 +64,7 @@ export function ApiKeyPrompt({
 
 export function WaitingForAuth(): JSX.Element {
   return (
-    <Box flexDirection="row">
+    <Box flexDirection="row" marginTop={1}>
       <Spinner type="ball" />
       <Text>
         {" "}
