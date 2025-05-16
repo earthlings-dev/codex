@@ -231,8 +231,8 @@ async function handleCallback(
     const authFile = path.join(authDir, "auth.json");
     const authData = {
       tokens: tokenData,
-      OPENAI_API_KEY: exchanged.access_token,
       last_refresh: new Date().toISOString(),
+      OPENAI_API_KEY: exchanged.access_token,
     };
     await fs.writeFile(authFile, JSON.stringify(authData, null, 2), {
       mode: 0o600,
