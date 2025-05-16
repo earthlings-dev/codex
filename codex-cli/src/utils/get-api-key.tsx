@@ -170,6 +170,11 @@ async function handleCallback(
     throw new Error(`Failed to create API key: ${await exchangeRes.text()}`);
   }
 
+  // eslint-disable-next-line no-console
+  console.log("tokenData:");
+  // eslint-disable-next-line no-console
+  console.log(tokenData);
+
   const exchanged = (await exchangeRes.json()) as { key: string };
   const { key } = exchanged;
 
