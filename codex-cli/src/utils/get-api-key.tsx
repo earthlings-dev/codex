@@ -151,13 +151,16 @@ async function handleCallback(
     throw new Error("Missing project in id_token claims");
   }
 
+  const randomId = crypto.randomBytes(6).toString("hex");
   const exchangeParams = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
     client_id: clientId,
     requested_token: "openai-api-key",
     subject_token: tokenData.id_token,
     subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
-    name: `Codex CLI (auto-generated) (${new Date().toISOString().slice(0, 10)})`,
+    name: `Codex CLI [auto-generated] (${new Date().toISOString().slice(0, 10)}-) [${
+      randomId
+    }]`,
   });
   const exchangeRes = await fetch(oidcConfig.token_endpoint, {
     method: "POST",
