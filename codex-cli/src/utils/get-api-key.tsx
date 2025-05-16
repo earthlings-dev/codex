@@ -221,6 +221,10 @@ async function handleCallback(
   // eslint-disable-next-line no-console
   console.log("exchanged:", exchanged);
 
+  if (!needsSetup) {
+    // TODO: handle credit granting
+  }
+
   return key || access_token;
 }
 
