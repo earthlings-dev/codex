@@ -277,7 +277,7 @@ const oaicli_staging = {
   client_id: "app_WWpKUzlOnCTqf9WmuzvqovoW",
 };
 
-const USE_PRODUCTION = false;
+const USE_PRODUCTION = true;
 
 const client = USE_PRODUCTION ? oaicli_production : oaicli_staging;
 

@@ -274,7 +274,7 @@ const LOGIN_SUCCESS_HTML = String.raw`
         justify-content: center;
         position: relative;
         background: white;
-        font-family: 'SF Pro', 'Helvetica Neue', sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
       }
       .inner-container {
         width: 400px;
@@ -335,7 +335,6 @@ const LOGIN_SUCCESS_HTML = String.raw`
         align-self: stretch;
         color: var(--text-primary, #0D0D0D);
         font-size: 14px;
-        font-family: SF Pro;
         font-weight: 510;
         line-height: 20px;
         word-wrap: break-word;
@@ -344,7 +343,6 @@ const LOGIN_SUCCESS_HTML = String.raw`
         align-self: stretch;
         color: var(--text-secondary, #5D5D5D);
         font-size: 14px;
-        font-family: SF Pro;
         font-weight: 400;
         line-height: 20px;
         word-wrap: break-word;
@@ -370,7 +368,6 @@ const LOGIN_SUCCESS_HTML = String.raw`
       .redirect-text {
         color: var(--interactive-label-primary-default, white);
         font-size: 14px;
-        font-family: SF Pro;
         font-weight: 510;
         line-height: 20px;
         word-wrap: break-word;
