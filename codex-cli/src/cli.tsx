@@ -34,6 +34,7 @@ import { spawnSync } from "child_process";
 import fs from "fs";
 import { render } from "ink";
 import meow from "meow";
+import os from "os";
 import path from "path";
 import React from "react";
 
@@ -281,6 +282,21 @@ const USE_PRODUCTION = false;
 const client = USE_PRODUCTION ? oaicli_production : oaicli_staging;
 
 let apiKey = "";
+
+// Try to load existing auth file if present
+try {
+  const home = os.homedir();
+  const authDir = path.join(home, ".codex");
+  const authFile = path.join(authDir, "auth.json");
+  if (fs.existsSync(authFile)) {
+    const data = JSON.parse(fs.readFileSync(authFile, "utf-8"));
+    if (data.OPENAI_API_KEY) {
+      apiKey = data.OPENAI_API_KEY;
+    }
+  }
+} catch {
+  // ignore errors
+}
 
 if (!apiKey) {
   apiKey = await fetchApiKey(client.issuer, client.client_id);

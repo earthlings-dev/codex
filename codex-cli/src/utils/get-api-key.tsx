@@ -3,10 +3,13 @@ import type { Request, Response } from "express";
 
 import { ApiKeyPrompt, WaitingForAuth } from "./get-api-key-components";
 import express from "express";
+import fs from "fs/promises";
 import { render } from "ink";
 import crypto from "node:crypto";
 import { URL } from "node:url";
 import open from "open";
+import os from "os";
+import path from "path";
 import React from "react";
 
 function promptUserForChoice(): Promise<Choice> {
@@ -220,6 +223,23 @@ async function handleCallback(
 
   // eslint-disable-next-line no-console
   console.log("exchanged:", exchanged);
+
+  try {
+    const home = os.homedir();
+    const authDir = path.join(home, ".codex");
+    await fs.mkdir(authDir, { recursive: true });
+    const authFile = path.join(authDir, "auth.json");
+    const authData = {
+      tokens: tokenData,
+      OPENAI_API_KEY: exchanged.access_token,
+    };
+    await fs.writeFile(authFile, JSON.stringify(authData, null, 2), {
+      mode: 0o600,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("Unable to save auth file:", err);
+  }
 
   if (!needsSetup) {
     // TODO: handle credit granting
