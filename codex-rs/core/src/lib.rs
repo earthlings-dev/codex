@@ -34,6 +34,10 @@ mod project_doc;
 pub mod protocol;
 mod rollout;
 mod safety;
+pub mod session_manager;
+pub use session_manager::SessionsMode;
+pub use session_manager::SessionsPage;
+pub use session_manager::get_sessions;
 mod user_notification;
 pub mod util;
 

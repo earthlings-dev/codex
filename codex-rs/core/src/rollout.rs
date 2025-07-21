@@ -19,8 +19,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::models::ResponseItem;
-
-const SESSIONS_SUBDIR: &str = "sessions";
+use crate::session_manager::SESSIONS_SUBDIR;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct SessionMeta {
