@@ -15,6 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::{self};
 use tracing::info;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -29,9 +30,7 @@ pub struct SessionMeta {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
-pub struct SessionStateSnapshot {
-    pub previous_response_id: Option<String>,
-}
+pub struct SessionStateSnapshot {}
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SavedSession {
@@ -118,8 +117,9 @@ impl RolloutRecorder {
                 ResponseItem::Message { .. }
                 | ResponseItem::LocalShellCall { .. }
                 | ResponseItem::FunctionCall { .. }
-                | ResponseItem::FunctionCallOutput { .. } => filtered.push(item.clone()),
-                ResponseItem::Reasoning { .. } | ResponseItem::Other => {
+                | ResponseItem::FunctionCallOutput { .. }
+                | ResponseItem::Reasoning { .. } => filtered.push(item.clone()),
+                ResponseItem::Other => {
                     // These should never be serialized.
                     continue;
                 }
@@ -171,13 +171,17 @@ impl RolloutRecorder {
                 }
                 continue;
             }
-            if let Ok(item) = serde_json::from_value::<ResponseItem>(v.clone()) {
-                match item {
+            match serde_json::from_value::<ResponseItem>(v.clone()) {
+                Ok(item) => match item {
                     ResponseItem::Message { .. }
                     | ResponseItem::LocalShellCall { .. }
                     | ResponseItem::FunctionCall { .. }
-                    | ResponseItem::FunctionCallOutput { .. } => items.push(item),
-                    ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
+                    | ResponseItem::FunctionCallOutput { .. }
+                    | ResponseItem::Reasoning { .. } => items.push(item),
+                    ResponseItem::Other => {}
+                },
+                Err(e) => {
+                    warn!("failed to parse item: {v:?}, error: {e}");
                 }
             }
         }
@@ -266,13 +270,14 @@ async fn rollout_writer(
                         ResponseItem::Message { .. }
                         | ResponseItem::LocalShellCall { .. }
                         | ResponseItem::FunctionCall { .. }
-                        | ResponseItem::FunctionCallOutput { .. } => {
+                        | ResponseItem::FunctionCallOutput { .. }
+                        | ResponseItem::Reasoning { .. } => {
                             if let Ok(json) = serde_json::to_string(&item) {
                                 let _ = file.write_all(json.as_bytes()).await;
                                 let _ = file.write_all(b"\n").await;
                             }
                         }
-                        ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
+                        ResponseItem::Other => {}
                     }
                 }
                 let _ = file.flush().await;

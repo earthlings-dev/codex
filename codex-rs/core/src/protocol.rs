@@ -422,6 +422,8 @@ pub struct ExecCommandEndEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecApprovalRequestEvent {
+    /// Identifier for the associated exec call, if available.
+    pub call_id: String,
     /// The command to be executed.
     pub command: Vec<String>,
     /// The command's working directory.
@@ -433,6 +435,8 @@ pub struct ExecApprovalRequestEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApplyPatchApprovalRequestEvent {
+    /// Responses API call id for the associated patch apply call, if available.
+    pub call_id: String,
     pub changes: HashMap<PathBuf, FileChange>,
     /// Optional explanatory reason (e.g. request for extra write access).
     #[serde(skip_serializing_if = "Option::is_none")]
