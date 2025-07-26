@@ -5,6 +5,7 @@
 // the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
+mod bash;
 mod chat_completions;
 mod client;
 mod client_common;
@@ -19,6 +20,7 @@ pub mod error;
 pub mod exec;
 pub mod exec_env;
 mod flags;
+pub mod git_info;
 mod is_safe_command;
 mod mcp_connection_manager;
 mod mcp_tool_call;
@@ -38,6 +40,7 @@ pub mod session_manager;
 pub use session_manager::SessionsMode;
 pub use session_manager::SessionsPage;
 pub use session_manager::get_sessions;
+pub mod shell;
 mod user_notification;
 pub mod util;
 
