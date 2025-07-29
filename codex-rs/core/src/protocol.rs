@@ -19,6 +19,7 @@ use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::plan_tool::UpdatePlanArgs;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -280,7 +281,7 @@ pub struct Event {
 /// Response event from the agent
 #[derive(Debug, Clone, Deserialize, Serialize, Display)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[strum(serialize_all = "lowercase")]
+#[strum(serialize_all = "snake_case")]
 pub enum EventMsg {
     /// Error while executing a submission
     Error(ErrorEvent),
@@ -334,6 +335,8 @@ pub enum EventMsg {
 
     /// Response to GetHistoryEntryRequest.
     GetHistoryEntryResponse(GetHistoryEntryResponseEvent),
+
+    PlanUpdate(UpdatePlanArgs),
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
