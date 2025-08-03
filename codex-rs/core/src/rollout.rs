@@ -266,13 +266,28 @@ impl RolloutRecorder {
         let ts_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
         );
-        let ts_utc = OffsetDateTime::parse(&session.timestamp, ts_format)
-            .map_err(|e| IoError::other(format!("failed to parse session timestamp: {e}")))?;
-        // Convert parsed UTC timestamp to local offset so filename date uses local time.
-        let local_offset = OffsetDateTime::now_local()
-            .map_err(|e| IoError::other(format!("failed to get local time offset: {e}")))?
-            .offset();
-        let ts = ts_utc.to_offset(local_offset);
+        // Parse the stored timestamp, but don't fail resume if parsing fails – fall back to
+        // current local time so we can still continue appending to the JSONL file and keep a
+        // snapshot up to date. This avoids breaking resume due to minor formatting mismatches.
+        let ts = match OffsetDateTime::parse(&session.timestamp, ts_format) {
+            Ok(ts_utc) => {
+                let local_offset = OffsetDateTime::now_local()
+                    .map_err(|e| IoError::other(format!("failed to get local time offset: {e}")))?
+                    .offset();
+                ts_utc.to_offset(local_offset)
+            }
+            Err(e) => {
+                warn!(
+                    "failed to parse session timestamp '{ts}': {e}; using current local time for snapshot path",
+                    ts = session.timestamp
+                );
+                OffsetDateTime::now_local().map_err(|e| {
+                    IoError::other(format!(
+                        "failed to get local time for snapshot fallback: {e}"
+                    ))
+                })?
+            }
+        };
         // sessions_dir = parent of parent of parent of the file path (strip YYYY/MM/DD)
         let sessions_dir = path
             .parent()
@@ -442,7 +457,7 @@ impl JsonlWriter {
     async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
         let mut json = serde_json::to_string(item)?;
         json.push('\n');
-        let _ = self.file.write_all(json.as_bytes()).await;
+        self.file.write_all(json.as_bytes()).await?;
         self.file.flush().await?;
         Ok(())
     }
