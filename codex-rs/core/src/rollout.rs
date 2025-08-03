@@ -288,14 +288,13 @@ impl RolloutRecorder {
                 })?
             }
         };
-        // sessions_dir = parent of parent of parent of the file path (strip YYYY/MM/DD)
+        // Determine the sessions directory by scanning ancestors for the
+        // top-level `sessions` folder to support both legacy nested layouts
+        // (sessions/YYYY/MM/DD/file) and the new flat layout (sessions/file).
         let sessions_dir = path
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .ok_or_else(|| {
-                IoError::other("invalid rollout path; expected sessions/YYYY/MM/DD/*")
-            })?;
+            .ancestors()
+            .find(|p| p.file_name().map(|n| n == SESSIONS_SUBDIR).unwrap_or(false))
+            .ok_or_else(|| IoError::other("invalid rollout path; missing sessions directory"))?;
         let snapshot_path = snapshot_filepath_in_dir(sessions_dir, session.id, ts)?;
 
         // Seed instructions from the first user message in the restored items, if any.
@@ -356,14 +355,11 @@ struct LogFileInfo {
 }
 
 fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.codex/sessions/YYYY/MM/DD and create it if missing.
+    // Resolve ~/.codex/sessions and create it if missing (no date subdirectories).
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.codex_home.clone();
     dir.push(SESSIONS_SUBDIR);
-    dir.push(timestamp.year().to_string());
-    dir.push(format!("{:02}", u8::from(timestamp.month())));
-    dir.push(format!("{:02}", timestamp.day()));
     fs::create_dir_all(&dir)?;
 
     // Custom format for YYYY-MM-DDThh-mm-ss. Use `-` instead of `:` for
