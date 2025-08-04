@@ -19,6 +19,7 @@ mod chat_composer_history;
 mod command_popup;
 mod file_search_popup;
 mod status_indicator_view;
+mod textarea;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -36,7 +37,7 @@ use status_indicator_view::StatusIndicatorView;
 pub(crate) struct BottomPane<'a> {
     /// Composer is retained even when a BottomPaneView is displayed so the
     /// input state is retained when the view is closed.
-    composer: ChatComposer<'a>,
+    composer: ChatComposer,
 
     /// If present, this is displayed instead of the `composer`.
     active_view: Option<Box<dyn BottomPaneView<'a> + 'a>>,
@@ -50,17 +51,42 @@ pub(crate) struct BottomPane<'a> {
 pub(crate) struct BottomPaneParams {
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) has_input_focus: bool,
+    pub(crate) enhanced_keys_supported: bool,
 }
 
 impl BottomPane<'_> {
     pub fn new(params: BottomPaneParams) -> Self {
+        let enhanced_keys_supported = params.enhanced_keys_supported;
         Self {
-            composer: ChatComposer::new(params.has_input_focus, params.app_event_tx.clone()),
+            composer: ChatComposer::new(
+                params.has_input_focus,
+                params.app_event_tx.clone(),
+                enhanced_keys_supported,
+            ),
             active_view: None,
             app_event_tx: params.app_event_tx,
             has_input_focus: params.has_input_focus,
             is_task_running: false,
             ctrl_c_quit_hint: false,
+        }
+    }
+
+    pub fn desired_height(&self, width: u16) -> u16 {
+        self.active_view
+            .as_ref()
+            .map(|v| v.desired_height(width))
+            .unwrap_or(self.composer.desired_height(width))
+    }
+
+    pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        // Hide the cursor whenever an overlay view is active (e.g. the
+        // status indicator shown while a task is running, or approval modal).
+        // In these states the textarea is not interactable, so we should not
+        // show its caret.
+        if self.active_view.is_some() {
+            None
+        } else {
+            self.composer.cursor_pos(area)
         }
     }
 
@@ -291,6 +317,7 @@ mod tests {
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
             has_input_focus: true,
+            enhanced_keys_supported: false,
         });
         pane.push_approval_request(exec_request());
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());

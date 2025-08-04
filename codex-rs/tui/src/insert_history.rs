@@ -4,6 +4,7 @@ use std::io::Write;
 
 use crate::tui;
 use crossterm::Command;
+use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::Color as CColor;
 use crossterm::style::Colors;
@@ -12,7 +13,6 @@ use crossterm::style::SetAttribute;
 use crossterm::style::SetBackgroundColor;
 use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
-use ratatui::layout::Position;
 use ratatui::layout::Size;
 use ratatui::prelude::Backend;
 use ratatui::style::Color;
@@ -21,8 +21,9 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 
 /// Insert `lines` above the viewport.
-pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line<'static>>) {
+pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line>) {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
+    let cursor_pos = terminal.get_cursor_position().ok();
 
     let mut area = terminal.get_frame().area();
 
@@ -35,12 +36,12 @@ pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line<'sta
             .backend_mut()
             .scroll_region_down(area.top()..screen_size.height, scroll_amount)
             .ok();
-        let cursor_top = area.top() - 1;
+        let cursor_top = area.top().saturating_sub(1);
         area.y += scroll_amount;
         terminal.set_viewport_area(area);
         cursor_top
     } else {
-        area.top() - 1
+        area.top().saturating_sub(1)
     };
 
     // Limit the scroll region to the lines from the top of the screen to the
@@ -60,9 +61,10 @@ pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line<'sta
     // └──────────────────────────────┘
     queue!(std::io::stdout(), SetScrollRegion(1..area.top())).ok();
 
-    terminal
-        .set_cursor_position(Position::new(0, cursor_top))
-        .ok();
+    // NB: we are using MoveTo instead of set_cursor_position here to avoid messing with the
+    // terminal's last_known_cursor_position, which hopefully will still be accurate after we
+    // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
+    queue!(std::io::stdout(), MoveTo(0, cursor_top)).ok();
 
     for line in lines {
         queue!(std::io::stdout(), Print("\r\n")).ok();
@@ -70,6 +72,11 @@ pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line<'sta
     }
 
     queue!(std::io::stdout(), ResetScrollRegion).ok();
+
+    // Restore the cursor position to where it was before we started.
+    if let Some(cursor_pos) = cursor_pos {
+        queue!(std::io::stdout(), MoveTo(cursor_pos.x, cursor_pos.y)).ok();
+    }
 }
 
 fn wrapped_line_count(lines: &[Line], width: u16) -> u16 {
@@ -209,18 +216,18 @@ where
 {
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
-    let mut modifier = Modifier::empty();
+    let mut last_modifier = Modifier::empty();
     for span in content {
-        let mut next_modifier = modifier;
-        next_modifier.insert(span.style.add_modifier);
-        next_modifier.remove(span.style.sub_modifier);
-        if next_modifier != modifier {
+        let mut modifier = Modifier::empty();
+        modifier.insert(span.style.add_modifier);
+        modifier.remove(span.style.sub_modifier);
+        if modifier != last_modifier {
             let diff = ModifierDiff {
-                from: modifier,
-                to: next_modifier,
+                from: last_modifier,
+                to: modifier,
             };
             diff.queue(&mut writer)?;
-            modifier = next_modifier;
+            last_modifier = modifier;
         }
         let next_fg = span.style.fg.unwrap_or(Color::Reset);
         let next_bg = span.style.bg.unwrap_or(Color::Reset);
@@ -242,4 +249,38 @@ where
         SetBackgroundColor(CColor::Reset),
         SetAttribute(crossterm::style::Attribute::Reset),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn writes_bold_then_regular_spans() {
+        use ratatui::style::Stylize;
+
+        let spans = ["A".bold(), "B".into()];
+
+        let mut actual: Vec<u8> = Vec::new();
+        write_spans(&mut actual, spans.iter()).unwrap();
+
+        let mut expected: Vec<u8> = Vec::new();
+        queue!(
+            expected,
+            SetAttribute(crossterm::style::Attribute::Bold),
+            Print("A"),
+            SetAttribute(crossterm::style::Attribute::NormalIntensity),
+            Print("B"),
+            SetForegroundColor(CColor::Reset),
+            SetBackgroundColor(CColor::Reset),
+            SetAttribute(crossterm::style::Attribute::Reset),
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(actual).unwrap(),
+            String::from_utf8(expected).unwrap()
+        );
+    }
 }

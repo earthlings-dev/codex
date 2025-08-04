@@ -6,16 +6,14 @@ use app::App;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config_types::SandboxMode;
-use codex_core::openai_api_key::OPENAI_API_KEY_ENV_VAR;
-use codex_core::openai_api_key::get_openai_api_key;
-use codex_core::openai_api_key::set_openai_api_key;
 use codex_core::protocol::AskForApproval;
 use codex_core::util::is_inside_git_repo;
-use codex_login::try_read_openai_api_key;
+use codex_login::load_auth;
 use log_layer::TuiLogLayer;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use tracing::error;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
@@ -24,11 +22,10 @@ mod app;
 mod app_event;
 mod app_event_sender;
 mod bottom_pane;
-mod cell_widget;
 mod chatwidget;
 mod citation_regex;
 mod cli;
-mod conversation_history_widget;
+mod custom_terminal;
 mod exec_command;
 mod file_search;
 mod get_git_diff;
@@ -37,13 +34,17 @@ mod history_cell;
 mod insert_history;
 mod log_layer;
 mod markdown;
-mod scroll_event_helper;
 mod slash_command;
 mod status_indicator_widget;
 mod text_block;
 mod text_formatting;
 mod tui;
 mod user_approval_widget;
+
+#[cfg(not(debug_assertions))]
+mod updates;
+#[cfg(not(debug_assertions))]
+use color_eyre::owo_colors::OwoColorize;
 
 pub use cli::Cli;
 
@@ -79,7 +80,7 @@ pub async fn run_main(
             config_profile: cli.config_profile.clone(),
             codex_linux_sandbox_exe,
             base_instructions: None,
-            include_plan_tool: None,
+            include_plan_tool: Some(true),
         };
         // Parse `-c` overrides from the CLI.
         let cli_kv_overrides = match cli.config_overrides.parse_overrides() {
@@ -143,7 +144,39 @@ pub async fn run_main(
         .with(tui_layer)
         .try_init();
 
-    let show_login_screen = should_show_login_screen(&config).await;
+    #[allow(clippy::print_stderr)]
+    #[cfg(not(debug_assertions))]
+    if let Some(latest_version) = updates::get_upgrade_version(&config) {
+        let current_version = env!("CARGO_PKG_VERSION");
+        let exe = std::env::current_exe()?;
+        let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
+
+        eprintln!(
+            "{} {current_version} -> {latest_version}.",
+            "✨⬆️ Update available!".bold().cyan()
+        );
+
+        if managed_by_npm {
+            let npm_cmd = "npm install -g @openai/codex@latest";
+            eprintln!("Run {} to update.", npm_cmd.cyan().on_black());
+        } else if cfg!(target_os = "macos")
+            && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
+        {
+            let brew_cmd = "brew upgrade codex";
+            eprintln!("Run {} to update.", brew_cmd.cyan().on_black());
+        } else {
+            eprintln!(
+                "See {} for the latest releases and installation options.",
+                "https://github.com/openai/codex/releases/latest"
+                    .cyan()
+                    .on_black()
+            );
+        }
+
+        eprintln!("");
+    }
+
+    let show_login_screen = should_show_login_screen(&config);
     if show_login_screen {
         std::io::stdout()
             .write_all(b"No API key detected.\nLogin with your ChatGPT account? [Yn] ")?;
@@ -156,8 +189,8 @@ pub async fn run_main(
         }
         // Spawn a task to run the login command.
         // Block until the login command is finished.
-        let new_key = codex_login::login_with_chatgpt(&config.codex_home, false).await?;
-        set_openai_api_key(new_key);
+        codex_login::login_with_chatgpt(&config.codex_home, false).await?;
+
         std::io::stdout().write_all(b"Login successful.\n")?;
     }
 
@@ -180,9 +213,13 @@ fn run_ratatui_app(
     color_eyre::install()?;
 
     // Forward panic reports through tracing so they appear in the UI status
-    // line instead of interleaving raw panic output with the interface.
-    std::panic::set_hook(Box::new(|info| {
+    // line, but do not swallow the default/color-eyre panic handler.
+    // Chain to the previous hook so users still get a rich panic report
+    // (including backtraces) after we restore the terminal.
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
         tracing::error!("panic: {info}");
+        prev_hook(info);
     }));
     let mut terminal = tui::init(&config)?;
     terminal.clear()?;
@@ -220,28 +257,21 @@ fn restore() {
     }
 }
 
-async fn should_show_login_screen(config: &Config) -> bool {
-    if is_in_need_of_openai_api_key(config) {
+#[allow(clippy::unwrap_used)]
+fn should_show_login_screen(config: &Config) -> bool {
+    if config.model_provider.requires_auth {
         // Reading the OpenAI API key is an async operation because it may need
         // to refresh the token. Block on it.
         let codex_home = config.codex_home.clone();
-        if let Ok(openai_api_key) = try_read_openai_api_key(&codex_home).await {
-            set_openai_api_key(openai_api_key);
-            false
-        } else {
-            true
+        match load_auth(&codex_home, true) {
+            Ok(Some(_)) => false,
+            Ok(None) => true,
+            Err(err) => {
+                error!("Failed to read auth.json: {err}");
+                true
+            }
         }
     } else {
         false
     }
-}
-
-fn is_in_need_of_openai_api_key(config: &Config) -> bool {
-    let is_using_openai_key = config
-        .model_provider
-        .env_key
-        .as_ref()
-        .map(|s| s == OPENAI_API_KEY_ENV_VAR)
-        .unwrap_or(false);
-    is_using_openai_key && get_openai_api_key().is_none()
 }

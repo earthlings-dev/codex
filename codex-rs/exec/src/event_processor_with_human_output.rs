@@ -1,3 +1,4 @@
+use codex_common::elapsed::format_duration;
 use codex_common::elapsed::format_elapsed;
 use codex_core::config::Config;
 use codex_core::plan_tool::UpdatePlanArgs;
@@ -11,6 +12,7 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::FileChange;
+use codex_core::protocol::McpInvocation;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
@@ -18,6 +20,7 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
+use codex_core::protocol::TurnDiffEvent;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use shlex::try_join;
@@ -37,11 +40,6 @@ const MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL: usize = 20;
 pub(crate) struct EventProcessorWithHumanOutput {
     call_id_to_command: HashMap<String, ExecCommandBegin>,
     call_id_to_patch: HashMap<String, PatchApplyBegin>,
-
-    /// Tracks in-flight MCP tool calls so we can calculate duration and print
-    /// a concise summary when the corresponding `McpToolCallEnd` event is
-    /// received.
-    call_id_to_tool_call: HashMap<String, McpToolCallBegin>,
 
     // To ensure that --color=never is respected, ANSI escapes _must_ be added
     // using .style() with one of these fields. If you need a new style, add a
@@ -70,7 +68,6 @@ impl EventProcessorWithHumanOutput {
     ) -> Self {
         let call_id_to_command = HashMap::new();
         let call_id_to_patch = HashMap::new();
-        let call_id_to_tool_call = HashMap::new();
 
         if with_ansi {
             Self {
@@ -83,7 +80,6 @@ impl EventProcessorWithHumanOutput {
                 red: Style::new().red(),
                 green: Style::new().green(),
                 cyan: Style::new().cyan(),
-                call_id_to_tool_call,
                 show_agent_reasoning: !config.hide_agent_reasoning,
                 answer_started: false,
                 reasoning_started: false,
@@ -100,7 +96,6 @@ impl EventProcessorWithHumanOutput {
                 red: Style::new(),
                 green: Style::new(),
                 cyan: Style::new(),
-                call_id_to_tool_call,
                 show_agent_reasoning: !config.hide_agent_reasoning,
                 answer_started: false,
                 reasoning_started: false,
@@ -112,15 +107,6 @@ impl EventProcessorWithHumanOutput {
 
 struct ExecCommandBegin {
     command: Vec<String>,
-    start_time: Instant,
-}
-
-/// Metadata captured when an `McpToolCallBegin` event is received.
-struct McpToolCallBegin {
-    /// Formatted invocation string, e.g. `server.tool({"city":"sf"})`.
-    invocation: String,
-    /// Timestamp when the call started so we can compute duration later.
-    start_time: Instant,
 }
 
 struct PatchApplyBegin {
@@ -184,10 +170,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 // Ignore.
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
-                handle_last_message(
-                    last_agent_message.as_deref(),
-                    self.last_message_path.as_deref(),
-                );
+                if let Some(output_file) = self.last_message_path.as_deref() {
+                    handle_last_message(last_agent_message.as_deref(), output_file);
+                }
                 return CodexStatus::InitiateShutdown;
             }
             EventMsg::TokenCount(TokenUsage { total_tokens, .. }) => {
@@ -242,7 +227,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     call_id.clone(),
                     ExecCommandBegin {
                         command: command.clone(),
-                        start_time: Instant::now(),
                     },
                 );
                 ts_println!(
@@ -253,20 +237,19 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     cwd.to_string_lossy(),
                 );
             }
+            EventMsg::ExecCommandOutputDelta(_) => {}
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
                 call_id,
                 stdout,
                 stderr,
+                duration,
                 exit_code,
             }) => {
                 let exec_command = self.call_id_to_command.remove(&call_id);
-                let (duration, call) = if let Some(ExecCommandBegin {
-                    command,
-                    start_time,
-                }) = exec_command
+                let (duration, call) = if let Some(ExecCommandBegin { command, .. }) = exec_command
                 {
                     (
-                        format!(" in {}", format_elapsed(start_time)),
+                        format!(" in {}", format_duration(duration)),
                         format!("{}", escape_command(&command).style(self.bold)),
                     )
                 } else {
@@ -292,63 +275,33 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!("{}", truncated_output.style(self.dimmed));
             }
             EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-                call_id,
-                server,
-                tool,
-                arguments,
+                call_id: _,
+                invocation,
             }) => {
-                // Build fully-qualified tool name: server.tool
-                let fq_tool_name = format!("{server}.{tool}");
-
-                // Format arguments as compact JSON so they fit on one line.
-                let args_str = arguments
-                    .as_ref()
-                    .map(|v: &serde_json::Value| {
-                        serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
-                    })
-                    .unwrap_or_default();
-
-                let invocation = if args_str.is_empty() {
-                    format!("{fq_tool_name}()")
-                } else {
-                    format!("{fq_tool_name}({args_str})")
-                };
-
-                self.call_id_to_tool_call.insert(
-                    call_id.clone(),
-                    McpToolCallBegin {
-                        invocation: invocation.clone(),
-                        start_time: Instant::now(),
-                    },
-                );
-
                 ts_println!(
                     self,
                     "{} {}",
                     "tool".style(self.magenta),
-                    invocation.style(self.bold),
+                    format_mcp_invocation(&invocation).style(self.bold),
                 );
             }
             EventMsg::McpToolCallEnd(tool_call_end_event) => {
                 let is_success = tool_call_end_event.is_success();
-                let McpToolCallEndEvent { call_id, result } = tool_call_end_event;
-                // Retrieve start time and invocation for duration calculation and labeling.
-                let info = self.call_id_to_tool_call.remove(&call_id);
-
-                let (duration, invocation) = if let Some(McpToolCallBegin {
+                let McpToolCallEndEvent {
+                    call_id: _,
+                    result,
                     invocation,
-                    start_time,
-                    ..
-                }) = info
-                {
-                    (format!(" in {}", format_elapsed(start_time)), invocation)
-                } else {
-                    (String::new(), format!("tool('{call_id}')"))
-                };
+                    duration,
+                } = tool_call_end_event;
+
+                let duration = format!(" in {}", format_duration(duration));
 
                 let status_str = if is_success { "success" } else { "failed" };
                 let title_style = if is_success { self.green } else { self.red };
-                let title = format!("{invocation} {status_str}{duration}:");
+                let title = format!(
+                    "{} {status_str}{duration}:",
+                    format_mcp_invocation(&invocation)
+                );
 
                 ts_println!(self, "{}", title.style(title_style));
 
@@ -446,6 +399,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 stdout,
                 stderr,
                 success,
+                ..
             }) => {
                 let patch_begin = self.call_id_to_patch.remove(&call_id);
 
@@ -474,6 +428,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 for line in output.lines() {
                     println!("{}", line.style(self.dimmed));
                 }
+            }
+            EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
+                ts_println!(self, "{}", "turn diff:".style(self.magenta));
+                println!("{unified_diff}");
             }
             EventMsg::ExecApprovalRequest(_) => {
                 // Should we exit?
@@ -542,5 +500,23 @@ fn format_file_change(change: &FileChange) -> &'static str {
         FileChange::Update {
             move_path: None, ..
         } => "M",
+    }
+}
+
+fn format_mcp_invocation(invocation: &McpInvocation) -> String {
+    // Build fully-qualified tool name: server.tool
+    let fq_tool_name = format!("{}.{}", invocation.server, invocation.tool);
+
+    // Format arguments as compact JSON so they fit on one line.
+    let args_str = invocation
+        .arguments
+        .as_ref()
+        .map(|v: &serde_json::Value| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()))
+        .unwrap_or_default();
+
+    if args_str.is_empty() {
+        format!("{fq_tool_name}()")
+    } else {
+        format!("{fq_tool_name}({args_str})")
     }
 }
