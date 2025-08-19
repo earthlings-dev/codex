@@ -43,26 +43,63 @@ pub(crate) async fn stream_chat_completions(
 
     let input = prompt.get_formatted_input();
 
-    // Pre-scan: map adjacent Reasoning items onto their closest assistant anchor
-    // (previous assistant message in "stop" turns, or next assistant tool_call in
-    // tool-call turns). We only attach when the anchor is an immediate neighbor.
+    // Pre-scan: map Reasoning blocks to the adjacent assistant anchor after the last user.
+    // - If the last emitted message is a user message, drop all reasoning.
+    // - Otherwise, for each Reasoning item after the last user message, attach it
+    //   to the immediate previous assistant message (stop turns) or the immediate
+    //   next assistant anchor (tool-call turns: function/local shell call, or assistant message).
     let mut reasoning_by_anchor_index: std::collections::HashMap<usize, String> =
         std::collections::HashMap::new();
+
+    // Determine the last role that would be emitted to Chat Completions.
+    let mut last_emitted_role: Option<&str> = None;
+    for item in &input {
+        match item {
+            ResponseItem::Message { role, .. } => last_emitted_role = Some(role.as_str()),
+            ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                last_emitted_role = Some("assistant")
+            }
+            ResponseItem::FunctionCallOutput { .. } => last_emitted_role = Some("tool"),
+            ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
+        }
+    }
+
+    // Find the last user message index in the input.
+    let mut last_user_index: Option<usize> = None;
     for (idx, item) in input.iter().enumerate() {
-        if let ResponseItem::Reasoning {
-            content: Some(items),
-            ..
-        } = item
-        {
-            let mut text = String::new();
-            for c in items {
-                match c {
-                    ReasoningItemContent::ReasoningText { text: t }
-                    | ReasoningItemContent::Text { text: t } => text.push_str(t),
+        if let ResponseItem::Message { role, .. } = item {
+            if role == "user" {
+                last_user_index = Some(idx);
+            }
+        }
+    }
+
+    // Attach reasoning only if the conversation does not end with a user message.
+    if !matches!(last_emitted_role, Some("user")) {
+        for (idx, item) in input.iter().enumerate() {
+            // Only consider reasoning that appears after the last user message.
+            if let Some(u_idx) = last_user_index {
+                if idx <= u_idx {
+                    continue;
                 }
             }
 
-            if !text.is_empty() {
+            if let ResponseItem::Reasoning {
+                content: Some(items),
+                ..
+            } = item
+            {
+                let mut text = String::new();
+                for c in items {
+                    match c {
+                        ReasoningItemContent::ReasoningText { text: t }
+                        | ReasoningItemContent::Text { text: t } => text.push_str(t),
+                    }
+                }
+                if text.trim().is_empty() {
+                    continue;
+                }
+
                 // Prefer immediate previous assistant message (stop turns)
                 let mut attached = false;
                 if idx > 0 {
@@ -77,16 +114,16 @@ pub(crate) async fn stream_chat_completions(
                     }
                 }
 
-                // Otherwise, attach to immediate next assistant anchor (tool-calls)
+                // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
                 if !attached && idx + 1 < input.len() {
                     match &input[idx + 1] {
-                        ResponseItem::Message { role, .. } if role == "assistant" => {
+                        ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
                             reasoning_by_anchor_index
                                 .entry(idx + 1)
                                 .and_modify(|v| v.push_str(&text))
                                 .or_insert(text.clone());
                         }
-                        ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                        ResponseItem::Message { role, .. } if role == "assistant" => {
                             reasoning_by_anchor_index
                                 .entry(idx + 1)
                                 .and_modify(|v| v.push_str(&text))
@@ -98,6 +135,11 @@ pub(crate) async fn stream_chat_completions(
             }
         }
     }
+
+    // Track last assistant text we emitted to avoid duplicate assistant messages
+    // in the outbound Chat Completions payload (can happen if a final
+    // aggregated assistant message was recorded alongside an earlier partial).
+    let mut last_assistant_text: Option<String> = None;
 
     for (idx, item) in input.iter().enumerate() {
         match item {
@@ -112,6 +154,16 @@ pub(crate) async fn stream_chat_completions(
                         _ => {}
                     }
                 }
+                // Skip exact-duplicate assistant messages.
+                if role == "assistant" {
+                    if let Some(prev) = &last_assistant_text {
+                        if prev == &text {
+                            continue;
+                        }
+                    }
+                    last_assistant_text = Some(text.clone());
+                }
+
                 let mut msg = json!({"role": role, "content": text});
                 if role == "assistant" {
                     if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
@@ -591,25 +643,45 @@ where
                     // do NOT emit yet. Forward any other item (e.g. FunctionCall) right
                     // away so downstream consumers see it.
 
-                    let is_assistant_delta = matches!(&item, crate::models::ResponseItem::Message { role, .. } if role == "assistant");
+                    let is_assistant_message = matches!(&item, crate::models::ResponseItem::Message { role, .. } if role == "assistant");
 
-                    if is_assistant_delta {
-                        // Only use the final assistant message if we have not
-                        // seen any deltas; otherwise, deltas already built the
-                        // cumulative text and this would duplicate it.
-                        if this.cumulative.is_empty() {
-                            if let crate::models::ResponseItem::Message { content, .. } = &item {
-                                if let Some(text) = content.iter().find_map(|c| match c {
-                                    crate::models::ContentItem::OutputText { text } => Some(text),
-                                    _ => None,
-                                }) {
-                                    this.cumulative.push_str(text);
+                    if is_assistant_message {
+                        match this.mode {
+                            AggregateMode::AggregatedOnly => {
+                                // Only use the final assistant message if we have not
+                                // seen any deltas; otherwise, deltas already built the
+                                // cumulative text and this would duplicate it.
+                                if this.cumulative.is_empty() {
+                                    if let crate::models::ResponseItem::Message {
+                                        content, ..
+                                    } = &item
+                                    {
+                                        if let Some(text) = content.iter().find_map(|c| match c {
+                                            crate::models::ContentItem::OutputText { text } => {
+                                                Some(text)
+                                            }
+                                            _ => None,
+                                        }) {
+                                            this.cumulative.push_str(text);
+                                        }
+                                    }
+                                }
+                                // Swallow assistant message here; emit on Completed.
+                                continue;
+                            }
+                            AggregateMode::Streaming => {
+                                // In streaming mode, if we have not seen any deltas, forward
+                                // the final assistant message directly. If deltas were seen,
+                                // suppress the final message to avoid duplication.
+                                if this.cumulative.is_empty() {
+                                    return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone(
+                                        item,
+                                    ))));
+                                } else {
+                                    continue;
                                 }
                             }
                         }
-
-                        // Swallow assistant message here; emit on Completed.
-                        continue;
                     }
 
                     // Not an assistant message – forward immediately.
@@ -640,6 +712,11 @@ where
                         emitted_any = true;
                     }
 
+                    // Always emit the final aggregated assistant message when any
+                    // content deltas have been observed. In AggregatedOnly mode this
+                    // is the sole assistant output; in Streaming mode this finalizes
+                    // the streamed deltas into a terminal OutputItemDone so callers
+                    // can persist/render the message once per turn.
                     if !this.cumulative.is_empty() {
                         let aggregated_message = crate::models::ResponseItem::Message {
                             id: None,
