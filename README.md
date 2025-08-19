@@ -376,7 +376,7 @@ It might contain hallucinations or harmful content.
 
 ---
 
-### Platform sandboxing details
+## Platform sandboxing details
 
 The mechanism Codex uses to implement the sandbox policy depends on your OS:
 
