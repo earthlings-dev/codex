@@ -43,7 +43,63 @@ pub(crate) async fn stream_chat_completions(
 
     let input = prompt.get_formatted_input();
 
-    for item in &input {
+    // Pre-scan: map adjacent Reasoning items onto their closest assistant anchor
+    // (previous assistant message in "stop" turns, or next assistant tool_call in
+    // tool-call turns). We only attach when the anchor is an immediate neighbor.
+    let mut reasoning_by_anchor_index: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::new();
+    for (idx, item) in input.iter().enumerate() {
+        if let ResponseItem::Reasoning {
+            content: Some(items),
+            ..
+        } = item
+        {
+            let mut text = String::new();
+            for c in items {
+                match c {
+                    ReasoningItemContent::ReasoningText { text: t }
+                    | ReasoningItemContent::Text { text: t } => text.push_str(t),
+                }
+            }
+
+            if !text.is_empty() {
+                // Prefer immediate previous assistant message (stop turns)
+                let mut attached = false;
+                if idx > 0 {
+                    if let ResponseItem::Message { role, .. } = &input[idx - 1] {
+                        if role == "assistant" {
+                            reasoning_by_anchor_index
+                                .entry(idx - 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                            attached = true;
+                        }
+                    }
+                }
+
+                // Otherwise, attach to immediate next assistant anchor (tool-calls)
+                if !attached && idx + 1 < input.len() {
+                    match &input[idx + 1] {
+                        ResponseItem::Message { role, .. } if role == "assistant" => {
+                            reasoning_by_anchor_index
+                                .entry(idx + 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                        }
+                        ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                            reasoning_by_anchor_index
+                                .entry(idx + 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    for (idx, item) in input.iter().enumerate() {
         match item {
             ResponseItem::Message { role, content, .. } => {
                 let mut text = String::new();
@@ -56,7 +112,15 @@ pub(crate) async fn stream_chat_completions(
                         _ => {}
                     }
                 }
-                messages.push(json!({"role": role, "content": text}));
+                let mut msg = json!({"role": role, "content": text});
+                if role == "assistant" {
+                    if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
+                        if let Some(obj) = msg.as_object_mut() {
+                            obj.insert("reasoning".to_string(), json!(reasoning));
+                        }
+                    }
+                }
+                messages.push(msg);
             }
             ResponseItem::FunctionCall {
                 name,
@@ -64,7 +128,7 @@ pub(crate) async fn stream_chat_completions(
                 call_id,
                 ..
             } => {
-                messages.push(json!({
+                let mut msg = json!({
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
@@ -75,7 +139,13 @@ pub(crate) async fn stream_chat_completions(
                             "arguments": arguments,
                         }
                     }]
-                }));
+                });
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
+                    if let Some(obj) = msg.as_object_mut() {
+                        obj.insert("reasoning".to_string(), json!(reasoning));
+                    }
+                }
+                messages.push(msg);
             }
             ResponseItem::LocalShellCall {
                 id,
@@ -84,7 +154,7 @@ pub(crate) async fn stream_chat_completions(
                 action,
             } => {
                 // Confirm with API team.
-                messages.push(json!({
+                let mut msg = json!({
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
@@ -93,7 +163,13 @@ pub(crate) async fn stream_chat_completions(
                         "status": status,
                         "action": action,
                     }]
-                }));
+                });
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
+                    if let Some(obj) = msg.as_object_mut() {
+                        obj.insert("reasoning".to_string(), json!(reasoning));
+                    }
+                }
+                messages.push(msg);
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
                 messages.push(json!({
@@ -102,10 +178,8 @@ pub(crate) async fn stream_chat_completions(
                     "content": output.content,
                 }));
             }
-            ResponseItem::Reasoning { .. } | ResponseItem::Other => {
-                // Omit these items from the conversation history.
-                continue;
-            }
+            ResponseItem::Reasoning { .. } => continue,
+            ResponseItem::Other => continue,
         }
     }
 
@@ -322,9 +396,38 @@ async fn process_chat_sse<S>(
                 }
 
                 if let Some(reasoning) = maybe_text {
+                    // Accumulate so we can emit a terminal Reasoning item at the end.
+                    reasoning_text.push_str(&reasoning);
                     let _ = tx_event
                         .send(Ok(ResponseEvent::ReasoningContentDelta(reasoning)))
                         .await;
+                }
+            }
+
+            // Some providers only include reasoning on the final message object.
+            if let Some(message_reasoning) = choice.get("message").and_then(|m| m.get("reasoning"))
+            {
+                // Accept either a plain string or an object with { text | content }
+                if let Some(s) = message_reasoning.as_str() {
+                    if !s.is_empty() {
+                        reasoning_text.push_str(s);
+                        let _ = tx_event
+                            .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
+                            .await;
+                    }
+                } else if let Some(obj) = message_reasoning.as_object() {
+                    if let Some(s) = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| obj.get("content").and_then(|v| v.as_str()))
+                    {
+                        if !s.is_empty() {
+                            reasoning_text.push_str(s);
+                            let _ = tx_event
+                                .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
+                                .await;
+                        }
+                    }
                 }
             }
 
