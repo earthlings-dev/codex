@@ -349,6 +349,20 @@ name = "Open Source"
 base_url = "http://my-ollama.example.com:11434/v1"
 ```
 
+#### Ollama context window handling
+
+If you are using the default setup of Ollama, you might run out of context window and see Codex
+struggle to complete tasks. You can increase the context window either using the `OLLAMA_CONTEXT_LENGTH`
+environment variable when you run `ollama serve` or by creating custom model. For example to create
+a 32k context window version of the `gpt-oss-20b` model run the following commands
+
+```bash
+echo "FROM gpt-oss:20b\nPARAMETER num_ctx 32000" > Modelfile
+ollama create gpt-oss:20b-32k -f Modelfile
+```
+
+Afterwards you can start Codex with `-m gpt-oss:20b-32k` to use a 32k context window.
+
 ---
 
 ### Platform sandboxing details
