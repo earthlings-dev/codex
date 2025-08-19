@@ -31,7 +31,9 @@
   - [Example prompts](#example-prompts)
 - [Running with a prompt as input](#running-with-a-prompt-as-input)
 - [Using Open Source Models](#using-open-source-models)
-  - [Platform sandboxing details](#platform-sandboxing-details)
+  - [Ollama context window handling](#ollama-context-window-handling)
+  - [Viewing raw chain-of-thought](#viewing-raw-chain-of-thought)
+- [Platform sandboxing details](#platform-sandboxing-details)
 - [Experimental technology disclaimer](#experimental-technology-disclaimer)
 - [System requirements](#system-requirements)
 - [CLI reference](#cli-reference)
@@ -349,7 +351,7 @@ name = "Open Source"
 base_url = "http://my-ollama.example.com:11434/v1"
 ```
 
-#### Ollama context window handling
+### Ollama context window handling
 
 If you are using the default setup of Ollama, you might run out of context window and see Codex
 struggle to complete tasks. You can increase the context window either using the `OLLAMA_CONTEXT_LENGTH`
@@ -363,7 +365,7 @@ ollama create gpt-oss:20b-32k -f Modelfile
 
 Afterwards you can start Codex with `-m gpt-oss:20b-32k` to use a 32k context window.
 
-#### Viewing raw chain-of-thought
+### Viewing raw chain-of-thought
 
 The local gpt-oss models do not output reasoning summaries and therefore you might not see some of
 the progress the model is doing besides the tool calling. If you need to see the raw chain-of-thought
