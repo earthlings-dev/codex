@@ -67,22 +67,20 @@ pub(crate) async fn stream_chat_completions(
     // Find the last user message index in the input.
     let mut last_user_index: Option<usize> = None;
     for (idx, item) in input.iter().enumerate() {
-        if let ResponseItem::Message { role, .. } = item {
-            if role == "user" {
+        if let ResponseItem::Message { role, .. } = item
+            && role == "user" {
                 last_user_index = Some(idx);
             }
-        }
     }
 
     // Attach reasoning only if the conversation does not end with a user message.
     if !matches!(last_emitted_role, Some("user")) {
         for (idx, item) in input.iter().enumerate() {
             // Only consider reasoning that appears after the last user message.
-            if let Some(u_idx) = last_user_index {
-                if idx <= u_idx {
+            if let Some(u_idx) = last_user_index
+                && idx <= u_idx {
                     continue;
                 }
-            }
 
             if let ResponseItem::Reasoning {
                 content: Some(items),
@@ -102,17 +100,15 @@ pub(crate) async fn stream_chat_completions(
 
                 // Prefer immediate previous assistant message (stop turns)
                 let mut attached = false;
-                if idx > 0 {
-                    if let ResponseItem::Message { role, .. } = &input[idx - 1] {
-                        if role == "assistant" {
+                if idx > 0
+                    && let ResponseItem::Message { role, .. } = &input[idx - 1]
+                        && role == "assistant" {
                             reasoning_by_anchor_index
                                 .entry(idx - 1)
                                 .and_modify(|v| v.push_str(&text))
                                 .or_insert(text.clone());
                             attached = true;
                         }
-                    }
-                }
 
                 // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
                 if !attached && idx + 1 < input.len() {
@@ -156,22 +152,19 @@ pub(crate) async fn stream_chat_completions(
                 }
                 // Skip exact-duplicate assistant messages.
                 if role == "assistant" {
-                    if let Some(prev) = &last_assistant_text {
-                        if prev == &text {
+                    if let Some(prev) = &last_assistant_text
+                        && prev == &text {
                             continue;
                         }
-                    }
                     last_assistant_text = Some(text.clone());
                 }
 
                 let mut msg = json!({"role": role, "content": text});
-                if role == "assistant" {
-                    if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
-                        if let Some(obj) = msg.as_object_mut() {
+                if role == "assistant"
+                    && let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
+                        && let Some(obj) = msg.as_object_mut() {
                             obj.insert("reasoning".to_string(), json!(reasoning));
                         }
-                    }
-                }
                 messages.push(msg);
             }
             ResponseItem::FunctionCall {
@@ -192,11 +185,10 @@ pub(crate) async fn stream_chat_completions(
                         }
                     }]
                 });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
-                    if let Some(obj) = msg.as_object_mut() {
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
+                    && let Some(obj) = msg.as_object_mut() {
                         obj.insert("reasoning".to_string(), json!(reasoning));
                     }
-                }
                 messages.push(msg);
             }
             ResponseItem::LocalShellCall {
@@ -216,11 +208,10 @@ pub(crate) async fn stream_chat_completions(
                         "action": action,
                     }]
                 });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
-                    if let Some(obj) = msg.as_object_mut() {
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
+                    && let Some(obj) = msg.as_object_mut() {
                         obj.insert("reasoning".to_string(), json!(reasoning));
                     }
-                }
                 messages.push(msg);
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
@@ -469,20 +460,17 @@ async fn process_chat_sse<S>(
                             .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
                             .await;
                     }
-                } else if let Some(obj) = message_reasoning.as_object() {
-                    if let Some(s) = obj
+                } else if let Some(obj) = message_reasoning.as_object()
+                    && let Some(s) = obj
                         .get("text")
                         .and_then(|v| v.as_str())
                         .or_else(|| obj.get("content").and_then(|v| v.as_str()))
-                    {
-                        if !s.is_empty() {
+                        && !s.is_empty() {
                             reasoning_text.push_str(s);
                             let _ = tx_event
                                 .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
                                 .await;
                         }
-                    }
-                }
             }
 
             // Handle streaming function / tool calls.
@@ -648,12 +636,11 @@ where
                                 // Only use the final assistant message if we have not
                                 // seen any deltas; otherwise, deltas already built the
                                 // cumulative text and this would duplicate it.
-                                if this.cumulative.is_empty() {
-                                    if let crate::models::ResponseItem::Message {
+                                if this.cumulative.is_empty()
+                                    && let crate::models::ResponseItem::Message {
                                         content, ..
                                     } = &item
-                                    {
-                                        if let Some(text) = content.iter().find_map(|c| match c {
+                                        && let Some(text) = content.iter().find_map(|c| match c {
                                             crate::models::ContentItem::OutputText { text } => {
                                                 Some(text)
                                             }
@@ -661,8 +648,6 @@ where
                                         }) {
                                             this.cumulative.push_str(text);
                                         }
-                                    }
-                                }
                                 // Swallow assistant message here; emit on Completed.
                                 continue;
                             }
