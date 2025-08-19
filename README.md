@@ -363,6 +363,15 @@ ollama create gpt-oss:20b-32k -f Modelfile
 
 Afterwards you can start Codex with `-m gpt-oss:20b-32k` to use a 32k context window.
 
+#### Viewing raw chain-of-thought
+
+The local gpt-oss models do not output reasoning summaries and therefore you might not see some of
+the progress the model is doing besides the tool calling. If you need to see the raw chain-of-thought
+you can enable the `show_raw_agent_reasoning = true` setting in your `config.toml`. 
+
+**Important:** The raw chain-of-thought is not moderated or filtered. 
+It might contain hallucinations or harmful content.
+
 ---
 
 ### Platform sandboxing details
