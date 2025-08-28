@@ -181,7 +181,7 @@ pub struct Config {
 
     /// Include the `view_image` tool that lets the agent attach a local image path to context.
     pub include_view_image_tool: bool,
-  
+
     /// The active profile name used to derive this `Config` (if any).
     pub active_profile: Option<String>,
 }
