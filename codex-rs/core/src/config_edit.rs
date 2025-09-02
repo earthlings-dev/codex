@@ -147,12 +147,10 @@ mod tests {
         set_default_model_and_effort(codex_home, "gpt-5", ReasoningEffort::High).expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
-        assert_eq!(val.get("model").and_then(|v| v.as_str()), Some("gpt-5"));
-        assert_eq!(
-            val.get("model_reasoning_effort").and_then(|v| v.as_str()),
-            Some("high")
-        );
+        let expected = r#"model = "gpt-5"
+model_reasoning_effort = "high"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]
@@ -167,25 +165,13 @@ mod tests {
         set_default_model_and_effort(codex_home, "o3", ReasoningEffort::Minimal).expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
+        let expected = r#"profile = "o3"
 
-        // Top-level model keys should not be present because a profile is set.
-        assert!(val.get("model").is_none());
-        assert!(val.get("model_reasoning_effort").is_none());
-
-        let profiles = val
-            .get("profiles")
-            .and_then(|v| v.as_table())
-            .expect("profiles table");
-        let o3 = profiles
-            .get("o3")
-            .and_then(|v| v.as_table())
-            .expect("o3 tbl");
-        assert_eq!(o3.get("model").and_then(|v| v.as_str()), Some("o3"));
-        assert_eq!(
-            o3.get("model_reasoning_effort").and_then(|v| v.as_str()),
-            Some("minimal")
-        );
+[profiles.o3]
+model = "o3"
+model_reasoning_effort = "minimal"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]
@@ -200,25 +186,13 @@ mod tests {
         set_default_model_and_effort(codex_home, "o3", ReasoningEffort::Minimal).expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
+        let expected = r#"profile = "my.team name"
 
-        // Top-level model keys should not be present because a profile is set.
-        assert!(val.get("model").is_none());
-        assert!(val.get("model_reasoning_effort").is_none());
-
-        let profiles = val
-            .get("profiles")
-            .and_then(|v| v.as_table())
-            .expect("profiles table");
-        let prof = profiles
-            .get("my.team name")
-            .and_then(|v| v.as_table())
-            .expect("profile tbl");
-        assert_eq!(prof.get("model").and_then(|v| v.as_str()), Some("o3"));
-        assert_eq!(
-            prof.get("model_reasoning_effort").and_then(|v| v.as_str()),
-            Some("minimal")
-        );
+[profiles."my.team name"]
+model = "o3"
+model_reasoning_effort = "minimal"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]
@@ -239,26 +213,11 @@ mod tests {
         .expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
-
-        // Should not touch top-level keys
-        assert!(val.get("model").is_none());
-        assert!(val.get("model_reasoning_effort").is_none());
-
-        // Should create the appropriate profile subtable
-        let profiles = val
-            .get("profiles")
-            .and_then(|v| v.as_table())
-            .expect("profiles table");
-        let tbl = profiles
-            .get("o3")
-            .and_then(|v| v.as_table())
-            .expect("o3 profile table");
-        assert_eq!(tbl.get("model").and_then(|v| v.as_str()), Some("o3"));
-        assert_eq!(
-            tbl.get("model_reasoning_effort").and_then(|v| v.as_str()),
-            Some("high")
-        );
+        let expected = r#"[profiles.o3]
+model = "o3"
+model_reasoning_effort = "high"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]
@@ -278,22 +237,15 @@ mod tests {
         .expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
-        assert_eq!(
-            val.get("a")
-                .and_then(|v| v.get("b"))
-                .and_then(|v| v.get("c"))
-                .and_then(|v| v.as_str()),
-            Some("v")
-        );
-        assert_eq!(val.get("x").and_then(|v| v.as_str()), Some("y"));
-        assert_eq!(
-            val.get("profiles")
-                .and_then(|v| v.get("p1"))
-                .and_then(|v| v.get("model"))
-                .and_then(|v| v.as_str()),
-            Some("gpt-5")
-        );
+        let expected = r#"x = "y"
+
+[a.b]
+c = "v"
+
+[profiles.p1]
+model = "gpt-5"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]
@@ -306,14 +258,10 @@ mod tests {
         persist_overrides(codex_home, None, &[(&["foo", "bar", "baz"], "ok")]).expect("persist");
 
         let contents = read_config(codex_home);
-        let val: toml::Value = toml::from_str(&contents).expect("parse");
-        assert_eq!(
-            val.get("foo")
-                .and_then(|v| v.get("bar"))
-                .and_then(|v| v.get("baz"))
-                .and_then(|v| v.as_str()),
-            Some("ok")
-        );
+        let expected = r#"[foo.bar]
+baz = "ok"
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]

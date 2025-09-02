@@ -916,13 +916,7 @@ mod tests {
 
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::fs;
     use tempfile::TempDir;
-
-    fn read_config(codex_home: &Path) -> String {
-        let p = codex_home.join(CONFIG_TOML_FILE);
-        fs::read_to_string(p).unwrap_or_default()
-    }
 
     #[test]
     fn test_toml_parsing() {
