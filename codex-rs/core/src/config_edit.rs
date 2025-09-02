@@ -50,14 +50,13 @@ fn persist_overrides(
         Err(e) => return Err(e.into()),
     };
 
-    let effective_profile: Option<String> = match profile {
-        Some(name) => Some(name.to_string()),
-        None => load_config_as_toml(codex_home).ok().and_then(|v| {
+    let effective_profile = profile.map(str::to_owned).or_else(|| {
+        load_config_as_toml(codex_home).ok().and_then(|v| {
             v.get("profile")
                 .and_then(|i| i.as_str())
                 .map(|s| s.to_string())
-        }),
-    };
+        })
+    });
 
     for (segments, val) in overrides.iter().copied() {
         let value = toml_edit::value(val);
