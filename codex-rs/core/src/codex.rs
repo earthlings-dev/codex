@@ -41,6 +41,7 @@ use crate::client::ModelClient;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::config::Config;
+use crate::config::set_default_model_and_effort_for_profile;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
 use crate::environment_context::EnvironmentContext;
@@ -1129,7 +1130,7 @@ async fn submission_loop(
 
                 // Persist model and reasoning effort across sessions.
                 if model.is_some() || effort.is_some() {
-                    let _ = crate::config::set_default_model_and_effort_for_profile(
+                    let _ = set_default_model_and_effort_for_profile(
                         &config.codex_home,
                         config.active_profile.as_deref(),
                         &effective_model,
