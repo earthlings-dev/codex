@@ -185,6 +185,11 @@ pub struct Config {
 
     /// The active profile name used to derive this `Config` (if any).
     pub active_profile: Option<String>,
+
+    /// When true, disables burst-paste detection for typed input entirely.
+    /// All characters are inserted as they are received, and no buffering
+    /// or placeholder replacement will occur for fast keypress bursts.
+    pub disable_paste_burst: bool,
 }
 
 impl Config {
@@ -492,6 +497,11 @@ pub struct ConfigToml {
 
     /// Nested tools section for feature toggles
     pub tools: Option<ToolsToml>,
+
+    /// When true, disables burst-paste detection for typed input entirely.
+    /// All characters are inserted as they are received, and no buffering
+    /// or placeholder replacement will occur for fast keypress bursts.
+    pub disable_paste_burst: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -501,7 +511,6 @@ pub struct ProjectConfig {
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct ToolsToml {
-    // Renamed from `web_search_request`; keep alias for backwards compatibility.
     #[serde(default, alias = "web_search_request")]
     pub web_search: Option<bool>,
 
@@ -671,7 +680,7 @@ impl Config {
             })?
             .clone();
 
-        let shell_environment_policy = cfg.shell_environment_policy.clone().into();
+        let shell_environment_policy = cfg.shell_environment_policy.into();
 
         let resolved_cwd = {
             use std::env;
@@ -692,7 +701,7 @@ impl Config {
             }
         };
 
-        let history = cfg.history.clone().unwrap_or_default();
+        let history = cfg.history.unwrap_or_default();
 
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
@@ -774,7 +783,7 @@ impl Config {
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            tui: cfg.tui.clone().unwrap_or_default(),
+            tui: cfg.tui.unwrap_or_default(),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -793,7 +802,7 @@ impl Config {
             model_verbosity: config_profile.model_verbosity.or(cfg.model_verbosity),
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
-                .or(cfg.chatgpt_base_url.clone())
+                .or(cfg.chatgpt_base_url)
                 .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
 
             experimental_resume,
@@ -807,6 +816,7 @@ impl Config {
                 .unwrap_or(false),
             include_view_image_tool,
             active_profile: active_profile_name,
+            disable_paste_burst: cfg.disable_paste_burst.unwrap_or(false),
         };
         Ok(config)
     }
@@ -1177,6 +1187,7 @@ disable_response_storage = true
                 use_experimental_streamable_shell_tool: false,
                 include_view_image_tool: true,
                 active_profile: Some("o3".to_string()),
+                disable_paste_burst: false,
             },
             o3_profile_config
         );
@@ -1235,6 +1246,7 @@ disable_response_storage = true
             use_experimental_streamable_shell_tool: false,
             include_view_image_tool: true,
             active_profile: Some("gpt3".to_string()),
+            disable_paste_burst: false,
         };
 
         assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
@@ -1308,6 +1320,7 @@ disable_response_storage = true
             use_experimental_streamable_shell_tool: false,
             include_view_image_tool: true,
             active_profile: Some("zdr".to_string()),
+            disable_paste_burst: false,
         };
 
         assert_eq!(expected_zdr_profile_config, zdr_profile_config);
@@ -1329,9 +1342,9 @@ disable_response_storage = true
 
         let raw_path = project_dir.path().to_string_lossy();
         let path_str = if raw_path.contains('\\') {
-            format!("'{}'", raw_path)
+            format!("'{raw_path}'")
         } else {
-            format!("\"{}\"", raw_path)
+            format!("\"{raw_path}\"")
         };
         let expected = format!(
             r#"[projects.{path_str}]
@@ -1352,9 +1365,9 @@ trust_level = "trusted"
         let config_path = codex_home.path().join(CONFIG_TOML_FILE);
         let raw_path = project_dir.path().to_string_lossy();
         let path_str = if raw_path.contains('\\') {
-            format!("'{}'", raw_path)
+            format!("'{raw_path}'")
         } else {
-            format!("\"{}\"", raw_path)
+            format!("\"{raw_path}\"")
         };
         // Use a quoted key so backslashes don't require escaping on Windows
         let initial = format!(
