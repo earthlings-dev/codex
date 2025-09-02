@@ -265,6 +265,71 @@ baz = "ok"
     }
 
     #[test]
+    fn set_default_model_preserves_comments() {
+        let tmpdir = tempdir().expect("tmp");
+        let codex_home = tmpdir.path();
+
+        // Seed a config with comments and spacing we expect to preserve
+        let seed = r#"# Global comment
+# Another line
+
+profile = "o3"
+
+# Profile settings
+[profiles.o3]
+# keep me
+existing = "keep"
+"#;
+        fs::write(codex_home.join(CONFIG_TOML_FILE), seed).expect("seed write");
+
+        // Apply defaults; since profile is set, it should write under [profiles.o3]
+        set_default_model_and_effort(codex_home, "o3", ReasoningEffort::High).expect("persist");
+
+        let contents = read_config(codex_home);
+        let expected = r#"# Global comment
+# Another line
+
+profile = "o3"
+
+# Profile settings
+[profiles.o3]
+# keep me
+existing = "keep"
+model = "o3"
+model_reasoning_effort = "high"
+"#;
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn set_default_model_preserves_global_comments() {
+        let tmpdir = tempdir().expect("tmp");
+        let codex_home = tmpdir.path();
+
+        // Seed a config WITHOUT a profile, containing comments and spacing
+        let seed = r#"# Top-level comments
+# should be preserved
+
+existing = "keep"
+"#;
+        fs::write(codex_home.join(CONFIG_TOML_FILE), seed).expect("seed write");
+
+        // Since there is no profile, the defaults should be written at top-level
+        set_default_model_and_effort(codex_home, "gpt-5", ReasoningEffort::Minimal)
+            .expect("persist");
+
+        let contents = read_config(codex_home);
+        let expected = r#"# Top-level comments
+# should be preserved
+
+existing = "keep"
+model = "gpt-5"
+model_reasoning_effort = "minimal"
+"#;
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
     fn persist_overrides_errors_on_parse_failure() {
         let tmpdir = tempdir().expect("tmp");
         let codex_home = tmpdir.path();
