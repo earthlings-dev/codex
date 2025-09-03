@@ -1,0 +1,76 @@
+name: Sync upstream branches and tags
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run hourly; adjust as desired
+    - cron: "0 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork repository
+        uses: actions/checkout@v4
+        with:
+          # Full history so ref operations work reliably
+          fetch-depth: 0
+          # Keep the default token-based credentials on origin for pushing
+          persist-credentials: true
+
+      - name: Configure git
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Add upstream remote (openai/codex)
+        run: |
+          # Use HTTPS to avoid requiring SSH keys/secrets. Functionally equivalent.
+          # Change to git@github.com:openai/codex.git if you prefer SSH and set up a deploy key.
+          git remote add upstream https://github.com/openai/codex.git || true
+          git remote -v
+
+      - name: Fetch upstream branches and tags (force)
+        run: |
+          # Fetch remote-tracking branches under refs/remotes/upstream/*
+          git fetch --prune upstream
+          # Ensure local tag refs match upstream even if they were moved
+          git fetch upstream --tags --force
+
+      - name: Force-push all upstream branches to origin (overwrite conflicts)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # List all upstream heads (branch names)
+          mapfile -t branches < <(git for-each-ref --format='%(refname:strip=3)' refs/remotes/upstream)
+          echo "Pushing ${#branches[@]} branches..."
+          for b in "${branches[@]}"; do
+            if [[ "$b" == HEAD ]]; then
+              continue
+            fi
+            echo "-> $b"
+            # Push the upstream tracking ref to the fork's branch, force-overwriting if it exists
+            git push origin --force "refs/remotes/upstream/${b}:refs/heads/${b}"
+          done
+
+      - name: Force-push upstream tags to origin (overwrite conflicts)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Local tags now reflect upstream; push them, force-overwriting conflicts.
+          git push origin --force --tags
+
+      - name: Summary
+        run: |
+          echo "Synced branches and tags from upstream to origin (conflicts overwritten)."
+          echo "Note: non-conflicting branches/tags in your fork are preserved."
+
