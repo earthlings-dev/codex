@@ -58,11 +58,6 @@ enum BackgroundEvent {
     },
 }
 
-enum PickerEvent {
-    Tui(TuiEvent),
-    Background(BackgroundEvent),
-}
-
 /// Interactive session picker that lists recorded rollout files with simple
 /// search and pagination. Shows the first user input as the preview, relative
 /// time (e.g., "5 seconds ago"), and the absolute path.
@@ -96,33 +91,36 @@ pub async fn run_resume_picker(tui: &mut Tui, codex_home: &Path) -> Result<Resum
     state.load_initial_page().await?;
     state.request_frame();
 
-    let tui_events = alt.tui.event_stream().map(PickerEvent::Tui);
-    let background_events = UnboundedReceiverStream::new(bg_rx).map(PickerEvent::Background);
-    let mut events = Box::pin(tui_events.merge(background_events));
+    let mut tui_events = alt.tui.event_stream().fuse();
+    let mut background_events = UnboundedReceiverStream::new(bg_rx).fuse();
 
-    while let Some(ev) = events.next().await {
-        match ev {
-            PickerEvent::Tui(TuiEvent::Key(key)) => {
-                if matches!(key.kind, KeyEventKind::Release) {
-                    continue;
-                }
-                if let Some(sel) = state.handle_key(key).await? {
-                    return Ok(sel);
+    loop {
+        tokio::select! {
+            Some(ev) = tui_events.next() => {
+                match ev {
+                    TuiEvent::Key(key) => {
+                        if matches!(key.kind, KeyEventKind::Release) {
+                            continue;
+                        }
+                        if let Some(sel) = state.handle_key(key).await? {
+                            return Ok(sel);
+                        }
+                    }
+                    TuiEvent::Draw => {
+                        if let Ok(size) = alt.tui.terminal.size() {
+                            let list_height = size.height.saturating_sub(3) as usize;
+                            state.update_view_rows(list_height);
+                            state.ensure_minimum_rows_for_view(list_height);
+                        }
+                        draw_picker(alt.tui, &state)?;
+                    }
+                    _ => {}
                 }
             }
-            PickerEvent::Tui(TuiEvent::Draw) => {
-                if let Ok(size) = alt.tui.terminal.size() {
-                    let list_height = size.height.saturating_sub(3) as usize;
-                    state.update_view_rows(list_height);
-                    state.ensure_minimum_rows_for_view(list_height);
-                }
-                draw_picker(alt.tui, &state)?;
-            }
-            PickerEvent::Background(event) => {
+            Some(event) = background_events.next() => {
                 state.handle_background_event(event)?;
             }
-            // Ignore paste and attach-image in picker
-            PickerEvent::Tui(_) => {}
+            else => break,
         }
     }
 
