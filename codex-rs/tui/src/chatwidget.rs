@@ -59,6 +59,7 @@ use crate::bottom_pane::InputResult;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::clipboard_paste::paste_image_to_temp_png;
+use crate::diff_render::display_path_for;
 use crate::get_git_diff::get_git_diff;
 use crate::history_cell;
 use crate::history_cell::CommandOutput;
@@ -66,6 +67,7 @@ use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
 use crate::slash_command::SlashCommand;
+use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
 // streaming internals are provided by crate::streaming and crate::markdown_stream
 use crate::user_approval_widget::ApprovalRequest;
@@ -130,6 +132,8 @@ pub(crate) struct ChatWidget {
     suppress_session_configured_redraw: bool,
     // User messages queued while a turn is in progress
     queued_user_messages: VecDeque<UserMessage>,
+    // Pending notification to show when unfocused on next Draw
+    pending_notification: Option<String>,
 }
 
 struct UserMessage {
@@ -257,6 +261,8 @@ impl ChatWidget {
 
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
+        // Emit a notification when the turn completes (suppressed if focused).
+        self.notify("Codex is done");
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -521,6 +527,12 @@ impl ChatWidget {
         self.flush_answer_stream_with_separator();
         // Emit the proposed command into history (like proposed patches)
         self.add_to_history(history_cell::new_proposed_command(&ev.command));
+        let command = shlex::try_join(ev.command.iter().map(|s| s.as_str()))
+            .unwrap_or_else(|_| ev.command.join(" "));
+        self.notify(format!(
+            "Codex wants to run: {}",
+            truncate_text(&command, 30)
+        ));
 
         let request = ApprovalRequest::Exec {
             id,
@@ -550,6 +562,15 @@ impl ChatWidget {
         };
         self.bottom_pane.push_approval_request(request);
         self.request_redraw();
+        self.notify(format!(
+            "Codex wants to edit {}",
+            if ev.changes.len() == 1 {
+                #[allow(clippy::unwrap_used)]
+                display_path_for(ev.changes.keys().next().unwrap(), &self.config.cwd)
+            } else {
+                format!("{} files", ev.changes.len())
+            }
+        ));
     }
 
     pub(crate) fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
@@ -664,6 +685,7 @@ impl ChatWidget {
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: true,
             suppress_session_configured_redraw: false,
+            pending_notification: None,
         }
     }
 
@@ -716,6 +738,7 @@ impl ChatWidget {
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
+            pending_notification: None,
         }
     }
 
@@ -1107,6 +1130,17 @@ impl ChatWidget {
 
     fn request_redraw(&mut self) {
         self.frame_requester.schedule_frame();
+    }
+
+    fn notify(&mut self, message: impl AsRef<str>) {
+        self.pending_notification = Some(message.as_ref().to_string());
+        self.request_redraw();
+    }
+
+    pub(crate) fn maybe_post_pending_notification(&mut self, tui: &mut crate::tui::Tui) {
+        if let Some(notif) = self.pending_notification.take() {
+            tui.notify(notif);
+        }
     }
 
     /// Mark the active exec cell as failed (✗) and flush it into history.
