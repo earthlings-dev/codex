@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_core::config::Config;
+use codex_core::config_types::Notifications;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
@@ -133,7 +134,7 @@ pub(crate) struct ChatWidget {
     // User messages queued while a turn is in progress
     queued_user_messages: VecDeque<UserMessage>,
     // Pending notification to show when unfocused on next Draw
-    pending_notification: Option<String>,
+    pending_notification: Option<Notification>,
 }
 
 struct UserMessage {
@@ -262,7 +263,7 @@ impl ChatWidget {
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
         // Emit a notification when the turn completes (suppressed if focused).
-        self.notify("Codex is done");
+        self.notify(Notification::AgentTurnComplete);
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -529,10 +530,7 @@ impl ChatWidget {
         self.add_to_history(history_cell::new_proposed_command(&ev.command));
         let command = shlex::try_join(ev.command.iter().map(|s| s.as_str()))
             .unwrap_or_else(|_| ev.command.join(" "));
-        self.notify(format!(
-            "Codex wants to run: {}",
-            truncate_text(&command, 30)
-        ));
+        self.notify(Notification::ExecApprovalRequested { command });
 
         let request = ApprovalRequest::Exec {
             id,
@@ -562,15 +560,10 @@ impl ChatWidget {
         };
         self.bottom_pane.push_approval_request(request);
         self.request_redraw();
-        self.notify(format!(
-            "Codex wants to edit {}",
-            if ev.changes.len() == 1 {
-                #[allow(clippy::unwrap_used)]
-                display_path_for(ev.changes.keys().next().unwrap(), &self.config.cwd)
-            } else {
-                format!("{} files", ev.changes.len())
-            }
-        ));
+        self.notify(Notification::EditApprovalRequested {
+            cwd: self.config.cwd.clone(),
+            changes: ev.changes.keys().cloned().collect(),
+        });
     }
 
     pub(crate) fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
@@ -1132,14 +1125,17 @@ impl ChatWidget {
         self.frame_requester.schedule_frame();
     }
 
-    fn notify(&mut self, message: impl AsRef<str>) {
-        self.pending_notification = Some(message.as_ref().to_string());
+    fn notify(&mut self, notification: Notification) {
+        if !notification.allowed_for(&self.config.tui.notifications) {
+            return;
+        }
+        self.pending_notification = Some(notification);
         self.request_redraw();
     }
 
     pub(crate) fn maybe_post_pending_notification(&mut self, tui: &mut crate::tui::Tui) {
         if let Some(notif) = self.pending_notification.take() {
-            tui.notify(notif);
+            tui.notify(notif.display());
         }
     }
 
@@ -1426,6 +1422,49 @@ impl WidgetRef for &ChatWidget {
             active_cell_area.y = active_cell_area.y.saturating_add(1);
             active_cell_area.height -= 1;
             cell.render_ref(active_cell_area, buf);
+        }
+    }
+}
+
+enum Notification {
+    AgentTurnComplete,
+    ExecApprovalRequested { command: String },
+    EditApprovalRequested { cwd: PathBuf, changes: Vec<PathBuf> },
+}
+
+impl Notification {
+    fn display(&self) -> String {
+        match self {
+            Notification::AgentTurnComplete => "Agent turn complete".to_string(),
+            Notification::ExecApprovalRequested { command } => {
+                format!("Approval requested: {}", truncate_text(command, 30))
+            }
+            Notification::EditApprovalRequested { cwd, changes } => {
+                format!(
+                    "Codex wants to edit {}",
+                    if changes.len() == 1 {
+                        #[allow(clippy::unwrap_used)]
+                        display_path_for(changes.first().unwrap(), cwd)
+                    } else {
+                        format!("{} files", changes.len())
+                    }
+                )
+            }
+        }
+    }
+
+    fn type_name(&self) -> &str {
+        match self {
+            Notification::AgentTurnComplete => "agent-turn-complete",
+            Notification::ExecApprovalRequested { .. }
+            | Notification::EditApprovalRequested { .. } => "approval-requested",
+        }
+    }
+
+    fn allowed_for(&self, settings: &Notifications) -> bool {
+        match settings {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(allowed) => allowed.iter().any(|a| a == self.type_name()),
         }
     }
 }

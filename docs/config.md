@@ -555,8 +555,17 @@ Options that are specific to the TUI.
 
 ```toml
 [tui]
-# More to come here
+# Send desktop notifications when approvals are required or a turn completes.
+# Defaults to false.
+notifications = true
+
+# You can optionally filter to specific notification types.
+# Available types are "agent-turn-complete" and "approval-requested".
+notifications = [ "agent-turn-complete", "approval-requested" ]
 ```
+
+> [!NOTE]
+> Codex emits desktop notifications using terminal escape codes. Not all terminals support these (notably, macOS Terminal.app and VS Code's terminal do not support custom notifications. iTerm2, Ghostty and WezTerm do support these notifications).
 
 ## Config reference
 
@@ -595,7 +604,8 @@ Options that are specific to the TUI.
 | `history.persistence` | `save-all` \| `none` | History file persistence (default: `save-all`). |
 | `history.max_bytes` | number | Currently ignored (not enforced). |
 | `file_opener` | `vscode` \| `vscode-insiders` \| `windsurf` \| `cursor` \| `none` | URI scheme for clickable citations (default: `vscode`). |
-| `tui` | table | TUI‑specific options (reserved). |
+| `tui` | table | TUI‑specific options. |
+| `tui.notifications` | boolean \| array<string> | Enable desktop notifications in the tui (default: false). |
 | `hide_agent_reasoning` | boolean | Hide model reasoning events. |
 | `show_raw_agent_reasoning` | boolean | Show raw reasoning (when available). |
 | `model_reasoning_effort` | `minimal` \| `low` \| `medium` \| `high` | Responses API reasoning effort. |
