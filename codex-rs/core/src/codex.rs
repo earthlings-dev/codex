@@ -2520,12 +2520,6 @@ fn split_cd_prefix_from_tokens(command: &[String]) -> Option<(String, Vec<String
     Some((workdir, remainder))
 }
 
-#[cfg(test)]
-mod rewrite_cd_prefix_tests {
-    use super::ShellToolCallParams;
-    use super::rewrite_cd_prefix_into_workdir;
-}
-
 fn parse_container_exec_arguments(
     arguments: String,
     turn_context: &TurnContext,
