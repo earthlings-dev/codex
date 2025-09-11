@@ -2445,12 +2445,12 @@ fn rewrite_cd_prefix_into_workdir(mut params: ShellToolCallParams) -> ShellToolC
         return params;
     }
 
-    if let Some((script_idx, script)) = extract_shell_script(&params.command) {
-        if let Some((workdir, rest)) = split_cd_prefix_from_script(script) {
-            params.workdir = Some(workdir);
-            params.command[script_idx] = rest;
-            return params;
-        }
+    if let Some((script_idx, script)) = extract_shell_script(&params.command)
+        && let Some((workdir, rest)) = split_cd_prefix_from_script(script)
+    {
+        params.workdir = Some(workdir);
+        params.command[script_idx] = rest;
+        return params;
     }
 
     if let Some((workdir, rest_command)) = split_cd_prefix_from_tokens(&params.command) {
