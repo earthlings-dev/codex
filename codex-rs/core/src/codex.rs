@@ -31,6 +31,7 @@ use mcp_types::CallToolResult;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json;
+use shlex;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tracing::debug;
@@ -2428,6 +2429,7 @@ async fn handle_custom_tool_call(
 }
 
 fn to_exec_params(params: ShellToolCallParams, turn_context: &TurnContext) -> ExecParams {
+    let params = rewrite_cd_prefix_into_workdir(params);
     ExecParams {
         command: params.command,
         cwd: turn_context.resolve_path(params.workdir.clone()),
@@ -2436,6 +2438,92 @@ fn to_exec_params(params: ShellToolCallParams, turn_context: &TurnContext) -> Ex
         with_escalated_permissions: params.with_escalated_permissions,
         justification: params.justification,
     }
+}
+
+fn rewrite_cd_prefix_into_workdir(mut params: ShellToolCallParams) -> ShellToolCallParams {
+    if params.workdir.is_some() {
+        return params;
+    }
+
+    if let Some((script_idx, script)) = extract_shell_script(&params.command) {
+        if let Some((workdir, rest)) = split_cd_prefix_from_script(script) {
+            params.workdir = Some(workdir);
+            params.command[script_idx] = rest;
+            return params;
+        }
+    }
+
+    if let Some((workdir, rest_command)) = split_cd_prefix_from_tokens(&params.command) {
+        params.workdir = Some(workdir);
+        params.command = rest_command;
+    }
+
+    params
+}
+
+fn extract_shell_script(command: &[String]) -> Option<(usize, &str)> {
+    match command {
+        [shell, flag, script]
+            if looks_like_shell_wrapper(shell) && (flag == "-lc" || flag == "-c") =>
+        {
+            Some((2, script.as_str()))
+        }
+        _ => None,
+    }
+}
+
+fn looks_like_shell_wrapper(shell: &str) -> bool {
+    shell.ends_with("bash") || shell.ends_with("sh") || shell.ends_with("zsh")
+}
+
+fn split_cd_prefix_from_script(script: &str) -> Option<(String, String)> {
+    let trimmed = script.trim_start();
+    let (cd_part, remainder) = trimmed.split_once("&&")?;
+    let remainder = remainder.trim_start();
+    if remainder.is_empty() || remainder.starts_with("cd ") || remainder == "cd" {
+        return None;
+    }
+
+    let cd_part = cd_part.trim_end();
+    let words = shlex::split(cd_part)?;
+    if words.len() != 2 || words.first()? != "cd" {
+        return None;
+    }
+
+    let workdir = words.get(1)?.to_string();
+    Some((workdir, remainder.to_string()))
+}
+
+fn split_cd_prefix_from_tokens(command: &[String]) -> Option<(String, Vec<String>)> {
+    if command.len() < 4 {
+        return None;
+    }
+
+    if command.first()?.as_str() != "cd" {
+        return None;
+    }
+
+    if command.get(2)?.as_str() != "&&" {
+        return None;
+    }
+
+    let workdir = command.get(1)?.clone();
+    let remainder = command.get(3..)?.to_vec();
+    if remainder.is_empty()
+        || remainder
+            .first()
+            .is_some_and(|first| first.as_str() == "cd" || first.starts_with("cd"))
+    {
+        return None;
+    }
+
+    Some((workdir, remainder))
+}
+
+#[cfg(test)]
+mod rewrite_cd_prefix_tests {
+    use super::ShellToolCallParams;
+    use super::rewrite_cd_prefix_into_workdir;
 }
 
 fn parse_container_exec_arguments(
@@ -3112,6 +3200,63 @@ mod tests {
             text: s.to_string(),
             r#type: "text".to_string(),
         })
+    }
+
+    fn shell_params(command: &[&str], workdir: Option<&str>) -> ShellToolCallParams {
+        ShellToolCallParams {
+            command: command.iter().map(|s| s.to_string()).collect(),
+            workdir: workdir.map(|s| s.to_string()),
+            timeout_ms: None,
+            with_escalated_permissions: None,
+            justification: None,
+        }
+    }
+
+    #[test]
+    fn cd_prefix_in_bash_script_is_promoted_to_workdir() {
+        let params = shell_params(&["bash", "-lc", "cd foo && echo hi"], None);
+        let updated = rewrite_cd_prefix_into_workdir(params);
+        assert_eq!(
+            updated.command,
+            vec!["bash".to_string(), "-lc".to_string(), "echo hi".to_string()]
+        );
+        assert_eq!(updated.workdir.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn cd_prefix_with_quoted_path_sets_workdir() {
+        let params = shell_params(&["bash", "-lc", "  cd 'foo bar' && ls"], None);
+        let updated = rewrite_cd_prefix_into_workdir(params);
+        assert_eq!(
+            updated.command,
+            vec!["bash".to_string(), "-lc".to_string(), "ls".to_string()]
+        );
+        assert_eq!(updated.workdir.as_deref(), Some("foo bar"));
+    }
+
+    #[test]
+    fn existing_workdir_is_left_intact() {
+        let params = shell_params(&["bash", "-lc", "cd foo && ls"], Some("already"));
+        let updated = rewrite_cd_prefix_into_workdir(params.clone());
+        assert_eq!(updated, params);
+    }
+
+    #[test]
+    fn cd_prefix_without_shell_wrapper_is_promoted() {
+        let params = shell_params(&["cd", "foo", "&&", "git", "status"], None);
+        let updated = rewrite_cd_prefix_into_workdir(params);
+        assert_eq!(
+            updated.command,
+            vec!["git".to_string(), "status".to_string()]
+        );
+        assert_eq!(updated.workdir.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn cd_prefix_with_additional_cd_is_left_unchanged() {
+        let params = shell_params(&["bash", "-lc", "cd foo && cd bar && ls"], None);
+        let updated = rewrite_cd_prefix_into_workdir(params.clone());
+        assert_eq!(updated, params);
     }
 
     #[test]
