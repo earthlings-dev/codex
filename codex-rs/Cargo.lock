@@ -585,6 +585,7 @@ dependencies = [
  "codex-protocol",
  "codex-protocol-ts",
  "codex-tui",
+ "libc",
  "serde_json",
  "tokio",
  "tracing",
