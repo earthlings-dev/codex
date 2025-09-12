@@ -219,6 +219,8 @@ async fn run_command_under_sandbox(
         if !stdout_bytes.is_empty() {
             let s = String::from_utf8_lossy(&stdout_bytes);
             let pid_set = child_pid_set.as_ref();
+            let mut seen_denials: HashSet<(String, String)> = HashSet::new();
+            let mut ordered_denials: Vec<(String, String)> = Vec::new();
             for line in s.lines() {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
@@ -250,27 +252,22 @@ async fn run_command_under_sandbox(
                         matched = true;
                     }
 
-                    if matched && let Some(msg) = event_msg {
-                        println!("{msg}");
+                    if matched
+                        && let Some(msg) = event_msg
+                        && let Some((name, capability)) = parse_denial_details(msg)
+                        && seen_denials.insert((name.clone(), capability.clone()))
+                    {
+                        ordered_denials.push((name, capability));
                     }
                 }
             }
-        }
 
-        // Print the set of PIDs we tracked at the end for debugging.
-        if let Some(set_arc) = &child_pid_set
-            && let Ok(guard) = set_arc.lock()
-            && !guard.is_empty()
-        {
-            let mut pids: Vec<i32> = guard.iter().copied().collect();
-            pids.sort_unstable();
-            println!(
-                "Tracked PIDs: {}",
-                pids.iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
+            if !ordered_denials.is_empty() {
+                eprintln!("\n=== Sandbox denials ===");
+                for (name, capability) in ordered_denials {
+                    eprintln!("({name}) {capability}");
+                }
+            }
         }
     }
 
@@ -445,9 +442,11 @@ fn track_descendants(root_pid: i32, pid_set: Arc<Mutex<HashSet<i32>>>, stop: Arc
     let mut events: [libc::kevent; EVENTS_CAP] =
         unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
 
-    while !stop.load(Ordering::Relaxed) || !active.is_empty() {
+    // Run until we're signaled to stop. We don't require all descendants to exit;
+    // when the root process finishes, we stop tracking promptly to avoid hangs.
+    while !stop.load(Ordering::Relaxed) {
         if active.is_empty() {
-            if stop.load(Ordering::Relaxed) || !pid_is_alive(root_pid) {
+            if !pid_is_alive(root_pid) {
                 break;
             }
             add_pid_watch(kq, root_pid, &mut seen, &mut active);
@@ -540,6 +539,28 @@ fn extract_pid_from_message(msg: &str) -> Option<i32> {
         }
     }
     None
+}
+
+fn parse_denial_details(msg: &str) -> Option<(String, String)> {
+    let after_prefix = msg.strip_prefix("Sandbox:")?.trim_start();
+    let open_paren = after_prefix.find('(')?;
+    let close_paren_rel = after_prefix[open_paren..].find(')')?;
+    let close_paren = open_paren + close_paren_rel;
+    let name = after_prefix[..open_paren].trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let after_paren = after_prefix[close_paren + 1..].trim_start();
+    let deny_idx = after_paren.find("deny(")?;
+    let after_deny = &after_paren[deny_idx..];
+    let deny_close_rel = after_deny.find(')')?;
+    let capability = after_deny[deny_close_rel + 1..].trim_start();
+    if capability.is_empty() {
+        return None;
+    }
+
+    Some((name.to_string(), capability.to_string()))
 }
 
 pub fn create_sandbox_mode(full_auto: bool) -> SandboxMode {
