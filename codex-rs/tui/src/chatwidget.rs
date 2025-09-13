@@ -296,7 +296,9 @@ impl ChatWidget {
     /// separated by newlines rather than auto‑submitting the next one.
     fn on_interrupted_turn(&mut self) {
         // Finalize, log a gentle prompt, and clear running state.
-        self.finalize_turn_with_error_message("Tell the model what to do differently".to_owned());
+        self.finalize_turn_with_error_message(
+            "Conversation interrupted - tell the model what to do differently".to_owned(),
+        );
 
         // If any messages were queued during the task, restore them into the composer.
         if !self.queued_user_messages.is_empty() {
@@ -588,14 +590,14 @@ impl ChatWidget {
                 self.active_exec_cell = Some(history_cell::new_active_exec_command(
                     ev.call_id.clone(),
                     ev.command.clone(),
-                    ev.parsed_cmd.clone(),
+                    ev.parsed_cmd,
                 ));
             }
         } else {
             self.active_exec_cell = Some(history_cell::new_active_exec_command(
                 ev.call_id.clone(),
                 ev.command.clone(),
-                ev.parsed_cmd.clone(),
+                ev.parsed_cmd,
             ));
         }
 
@@ -820,7 +822,7 @@ impl ChatWidget {
             "attach_image path={path:?} width={width} height={height} format={format_label}",
         );
         self.bottom_pane
-            .attach_image(path.clone(), width, height, format_label);
+            .attach_image(path, width, height, format_label);
         self.request_redraw();
     }
 
@@ -1002,7 +1004,7 @@ impl ChatWidget {
 
         // Only show the text portion in conversation history.
         if !text.is_empty() {
-            self.add_to_history(history_cell::new_user_prompt(text.clone()));
+            self.add_to_history(history_cell::new_user_prompt(text));
         }
     }
 
@@ -1071,10 +1073,10 @@ impl ChatWidget {
             EventMsg::PlanUpdate(update) => self.on_plan_update(update),
             EventMsg::ExecApprovalRequest(ev) => {
                 // For replayed events, synthesize an empty id (these should not occur).
-                self.on_exec_approval_request(id.clone().unwrap_or_default(), ev)
+                self.on_exec_approval_request(id.unwrap_or_default(), ev)
             }
             EventMsg::ApplyPatchApprovalRequest(ev) => {
-                self.on_apply_patch_approval_request(id.clone().unwrap_or_default(), ev)
+                self.on_apply_patch_approval_request(id.unwrap_or_default(), ev)
             }
             EventMsg::ExecCommandBegin(ev) => self.on_exec_command_begin(ev),
             EventMsg::ExecCommandOutputDelta(delta) => self.on_exec_command_output_delta(delta),
@@ -1099,10 +1101,12 @@ impl ChatWidget {
                     self.on_user_message_event(ev);
                 }
             }
-            EventMsg::ConversationHistory(ev) => {
+            EventMsg::ConversationPath(ev) => {
                 self.app_event_tx
                     .send(crate::app_event::AppEvent::ConversationHistory(ev));
             }
+            EventMsg::EnteredReviewMode(_) => {}
+            EventMsg::ExitedReviewMode(_) => {}
         }
     }
 
@@ -1221,9 +1225,13 @@ impl ChatWidget {
                 tracing::info!(
                     "New model: {}, New effort: {}, Current model: {}, Current effort: {}",
                     model_slug.clone(),
-                    effort,
+                    effort
+                        .map(|effort| effort.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
                     current_model,
                     current_effort
+                        .map(|effort| effort.to_string())
+                        .unwrap_or_else(|| "none".to_string())
                 );
             })];
             items.push(SelectionItem {
@@ -1237,7 +1245,7 @@ impl ChatWidget {
         self.bottom_pane.show_selection_view(
             "Select model and reasoning level".to_string(),
             Some("Switch between OpenAI models for this and future Codex CLI session".to_string()),
-            Some("Press Enter to confirm or Esc to go back".to_string()),
+            Some("Press Enter to confirm, Esc to go back, Ctrl+S to save".to_string()),
             items,
         );
     }
@@ -1294,13 +1302,23 @@ impl ChatWidget {
     }
 
     /// Set the reasoning effort in the widget's config copy.
-    pub(crate) fn set_reasoning_effort(&mut self, effort: ReasoningEffortConfig) {
+    pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.config.model_reasoning_effort = effort;
     }
 
     /// Set the model in the widget's config copy.
     pub(crate) fn set_model(&mut self, model: String) {
         self.config.model = model;
+    }
+
+    pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {
+        self.add_to_history(history_cell::new_info_event(message, hint));
+        self.request_redraw();
+    }
+
+    pub(crate) fn add_error_message(&mut self, message: String) {
+        self.add_to_history(history_cell::new_error_event(message));
+        self.request_redraw();
     }
 
     pub(crate) fn add_mcp_output(&mut self) {
@@ -1344,6 +1362,11 @@ impl ChatWidget {
 
     pub(crate) fn insert_str(&mut self, text: &str) {
         self.bottom_pane.insert_str(text);
+    }
+
+    /// Replace the composer content with the provided text and reset cursor.
+    pub(crate) fn set_composer_text(&mut self, text: String) {
+        self.bottom_pane.set_composer_text(text);
     }
 
     pub(crate) fn show_esc_backtrack_hint(&mut self) {
@@ -1509,4 +1532,4 @@ fn extract_first_bold(s: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
