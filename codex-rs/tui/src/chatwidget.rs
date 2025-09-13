@@ -104,6 +104,7 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) initial_prompt: Option<String>,
     pub(crate) initial_images: Vec<PathBuf>,
     pub(crate) enhanced_keys_supported: bool,
+    pub(crate) tui_notifications: Notifications,
 }
 
 pub(crate) struct ChatWidget {
@@ -135,6 +136,8 @@ pub(crate) struct ChatWidget {
     queued_user_messages: VecDeque<UserMessage>,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
+    // Effective TUI notifications setting loaded from config.toml
+    tui_notifications: Notifications,
 }
 
 struct UserMessage {
@@ -646,6 +649,7 @@ impl ChatWidget {
             initial_prompt,
             initial_images,
             enhanced_keys_supported,
+            tui_notifications,
         } = common;
         let mut rng = rand::rng();
         let placeholder = EXAMPLE_PROMPTS[rng.random_range(0..EXAMPLE_PROMPTS.len())].to_string();
@@ -681,6 +685,7 @@ impl ChatWidget {
             show_welcome_banner: true,
             suppress_session_configured_redraw: false,
             pending_notification: None,
+            tui_notifications,
         }
     }
 
@@ -697,6 +702,7 @@ impl ChatWidget {
             initial_prompt,
             initial_images,
             enhanced_keys_supported,
+            tui_notifications,
         } = common;
         let mut rng = rand::rng();
         let placeholder = EXAMPLE_PROMPTS[rng.random_range(0..EXAMPLE_PROMPTS.len())].to_string();
@@ -734,6 +740,7 @@ impl ChatWidget {
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
             pending_notification: None,
+            tui_notifications,
         }
     }
 
@@ -1130,7 +1137,7 @@ impl ChatWidget {
     }
 
     fn notify(&mut self, notification: Notification) {
-        if !notification.allowed_for(&self.config.tui.notifications) {
+        if !notification.allowed_for(&self.tui_notifications) {
             return;
         }
         self.pending_notification = Some(notification);
