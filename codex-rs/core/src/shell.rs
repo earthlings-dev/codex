@@ -139,7 +139,9 @@ fn strip_bash_lc(command: &Vec<String>) -> Option<String> {
 ///
 /// For shell wrappers such as `bash -lc "cd repo && git status"` this removes
 /// the leading `cd` segment so the displayed command mirrors what will actually
-/// run inside the working directory. Non-shell invocations are returned
+/// run inside the working directory. When the command is provided as plain
+/// tokens (`["cd", "repo", "&&", "git", "status"]`) the prefix is stripped in
+/// the same way. Commands that do not look like `cd <path> && ...` are returned
 /// unchanged.
 pub fn prettify_command_for_display(command: &[String]) -> Vec<String> {
     if let Some((script_idx, script)) = extract_shell_script(command)
@@ -148,6 +150,10 @@ pub fn prettify_command_for_display(command: &[String]) -> Vec<String> {
         let mut display = command.to_vec();
         display[script_idx] = split.remainder;
         return display;
+    }
+
+    if let Some(remainder) = strip_cd_prefix_from_tokens(command) {
+        return remainder;
     }
 
     command.to_vec()
@@ -266,6 +272,38 @@ fn join_shell_words_preserving_operators(tokens: &[String]) -> Option<String> {
 
 fn is_shell_operator(token: &str) -> bool {
     matches!(token, "&&" | "||" | "|" | ";")
+}
+
+fn strip_cd_prefix_from_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.len() < 4 {
+        return None;
+    }
+
+    if command.first()?.as_str() != "cd" {
+        return None;
+    }
+
+    if command.get(2)?.as_str() != "&&" {
+        return None;
+    }
+
+    if command.get(1)?.is_empty() {
+        return None;
+    }
+
+    let remainder = command.get(3..)?.to_vec();
+    if remainder.is_empty() {
+        return None;
+    }
+
+    if remainder
+        .first()
+        .is_some_and(|first| first.as_str() == "cd" || first.starts_with("cd"))
+    {
+        return None;
+    }
+
+    Some(remainder)
 }
 
 #[cfg(unix)]
@@ -446,7 +484,7 @@ mod prettify_command_for_display_tests {
     }
 
     #[test]
-    fn plain_cd_command_is_preserved() {
+    fn plain_cd_command_prefix_is_hidden() {
         let command = vec![
             "cd".to_string(),
             "/tmp".to_string(),
@@ -454,7 +492,30 @@ mod prettify_command_for_display_tests {
             "pwd".to_string(),
         ];
         let display = prettify_command_for_display(&command);
-        assert_eq!(display, command);
+        assert_eq!(display, vec!["pwd".to_string()]);
+    }
+
+    #[test]
+    fn plain_cd_command_preserves_following_connectors() {
+        let command = vec![
+            "cd".to_string(),
+            "foo".to_string(),
+            "&&".to_string(),
+            "ls".to_string(),
+            "&&".to_string(),
+            "git".to_string(),
+            "status".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec![
+                "ls".to_string(),
+                "&&".to_string(),
+                "git".to_string(),
+                "status".to_string(),
+            ]
+        );
     }
 
     #[test]
