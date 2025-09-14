@@ -1,6 +1,9 @@
+use crate::bash::try_parse_bash;
+use crate::bash::try_parse_word_only_commands_sequence;
 use serde::Deserialize;
 use serde::Serialize;
 use shlex;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -131,6 +134,120 @@ fn strip_bash_lc(command: &Vec<String>) -> Option<String> {
     }
 }
 
+pub fn prettify_command_for_display(command: &[String]) -> Vec<String> {
+    if let Some((script_idx, script)) = extract_shell_script(command)
+        && let Some((_, rest)) = split_cd_prefix_from_script(script)
+    {
+        let mut display = command.to_vec();
+        display[script_idx] = rest;
+        return display;
+    }
+
+    if let Some((_, rest_command)) = split_cd_prefix_from_tokens(command) {
+        return rest_command;
+    }
+
+    command.to_vec()
+}
+
+fn extract_shell_script(command: &[String]) -> Option<(usize, &str)> {
+    match command {
+        [shell, flag, script]
+            if looks_like_shell_wrapper(shell) && (flag == "-lc" || flag == "-c") =>
+        {
+            Some((2, script.as_str()))
+        }
+        _ => None,
+    }
+}
+
+fn looks_like_shell_wrapper(shell: &str) -> bool {
+    let name = Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell);
+
+    matches!(name, "bash" | "sh" | "zsh")
+}
+
+fn split_cd_prefix_from_script(script: &str) -> Option<(String, String)> {
+    let tree = try_parse_bash(script)?;
+    let mut commands = try_parse_word_only_commands_sequence(&tree, script)?;
+    if commands.is_empty() {
+        return None;
+    }
+
+    commands.reverse();
+    let mut iter = commands.into_iter();
+    let cd_command = iter.next()?;
+    if cd_command.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+
+    if cd_command.len() != 2 {
+        return None;
+    }
+
+    if iter.any(|cmd| cmd.first().map(String::as_str) == Some("cd")) {
+        return None;
+    }
+
+    let workdir = cd_command.get(1)?.clone();
+    if workdir.is_empty() {
+        return None;
+    }
+
+    let tokens = shlex::split(script)?;
+    let rest_tokens = tokens_after_first_command(&tokens)?;
+    let rest_script = shlex::try_join(rest_tokens.iter().map(|s| s.as_str())).ok()?;
+
+    Some((workdir, rest_script))
+}
+
+fn split_cd_prefix_from_tokens(command: &[String]) -> Option<(String, Vec<String>)> {
+    if command.len() < 4 {
+        return None;
+    }
+
+    if command.first()?.as_str() != "cd" {
+        return None;
+    }
+
+    if command.get(2)?.as_str() != "&&" {
+        return None;
+    }
+
+    let workdir = command.get(1)?.clone();
+    let remainder = command.get(3..)?.to_vec();
+    if remainder.is_empty()
+        || remainder
+            .first()
+            .is_some_and(|first| first.as_str() == "cd" || first.starts_with("cd"))
+    {
+        return None;
+    }
+
+    Some((workdir, remainder))
+}
+
+fn tokens_after_first_command(tokens: &[String]) -> Option<&[String]> {
+    let mut idx = 0;
+    while idx < tokens.len() && tokens[idx] != "&&" {
+        idx += 1;
+    }
+
+    if idx == tokens.len() {
+        return None;
+    }
+
+    let rest_start = idx + 1;
+    if rest_start >= tokens.len() {
+        return None;
+    }
+
+    Some(&tokens[rest_start..])
+}
+
 #[cfg(unix)]
 fn detect_default_user_shell() -> Shell {
     use libc::getpwuid;
@@ -207,6 +324,93 @@ pub async fn default_user_shell() -> Shell {
             exe: "powershell.exe".to_string(),
             bash_exe_fallback: bash_exe,
         })
+    }
+}
+
+#[cfg(test)]
+mod prettify_command_for_display_tests {
+    use super::prettify_command_for_display;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn cd_prefix_in_bash_script_is_hidden() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd foo && echo hi".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec!["bash".to_string(), "-lc".to_string(), "echo hi".to_string()]
+        );
+    }
+
+    #[test]
+    fn cd_prefix_with_quoted_path_is_hidden() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "  cd 'foo bar' && ls".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec!["bash".to_string(), "-lc".to_string(), "ls".to_string()]
+        );
+    }
+
+    #[test]
+    fn cd_prefix_without_shell_wrapper_is_hidden() {
+        let command = vec![
+            "cd".to_string(),
+            "foo".to_string(),
+            "&&".to_string(),
+            "git".to_string(),
+            "status".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(display, vec!["git".to_string(), "status".to_string()]);
+    }
+
+    #[test]
+    fn cd_prefix_with_additional_cd_is_preserved() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd foo && cd bar && ls".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(display, command);
+    }
+
+    #[test]
+    fn cd_prefix_with_or_connector_is_preserved() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd and_and || echo \"couldn't find the dir for &&\"".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(display, command);
+    }
+
+    #[test]
+    fn cd_prefix_with_ampersands_in_string_is_hidden() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd foo && echo \"checking && markers\"".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec![
+                "bash".to_string(),
+                "-lc".to_string(),
+                "echo 'checking && markers'".to_string(),
+            ]
+        );
     }
 }
 

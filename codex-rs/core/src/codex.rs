@@ -2780,7 +2780,7 @@ async fn handle_container_exec_with_params(
                     params.with_escalated_permissions.unwrap_or(false),
                 )
             };
-            let command_for_display = params.command.clone();
+            let command_for_display = shell::prettify_command_for_display(&params.command);
             (params, safety, command_for_display)
         }
     };
