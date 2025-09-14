@@ -134,22 +134,27 @@ fn strip_bash_lc(command: &Vec<String>) -> Option<String> {
     }
 }
 
+/// Returns a copy of `command` that is easier for humans to read when rendered
+/// in activity logs and error messages.
+///
+/// For shell wrappers such as `bash -lc "cd repo && git status"` this removes
+/// the leading `cd` segment so the displayed command mirrors what will actually
+/// run inside the working directory. Non-shell invocations are returned
+/// unchanged.
 pub fn prettify_command_for_display(command: &[String]) -> Vec<String> {
     if let Some((script_idx, script)) = extract_shell_script(command)
-        && let Some((_, rest)) = split_cd_prefix_from_script(script)
+        && let Some(split) = split_cd_prefix_from_script(script)
     {
         let mut display = command.to_vec();
-        display[script_idx] = rest;
+        display[script_idx] = split.remainder;
         return display;
-    }
-
-    if let Some((_, rest_command)) = split_cd_prefix_from_tokens(command) {
-        return rest_command;
     }
 
     command.to_vec()
 }
 
+/// Detects `[shell, flag, script]` commands such as `bash -lc "<script>"` and
+/// returns the index of the script argument alongside its contents.
 fn extract_shell_script(command: &[String]) -> Option<(usize, &str)> {
     match command {
         [shell, flag, script]
@@ -170,16 +175,22 @@ fn looks_like_shell_wrapper(shell: &str) -> bool {
     matches!(name, "bash" | "sh" | "zsh")
 }
 
-fn split_cd_prefix_from_script(script: &str) -> Option<(String, String)> {
+/// Result of stripping a single leading `cd` command from an interactive shell
+/// script. The command `cd <dir> && rest` yields the directory (kept for future
+/// use) alongside the remainder of the script.
+struct ShellScriptCdSplit {
+    _workdir: String,
+    remainder: String,
+}
+
+fn split_cd_prefix_from_script(script: &str) -> Option<ShellScriptCdSplit> {
     let tree = try_parse_bash(script)?;
     let mut commands = try_parse_word_only_commands_sequence(&tree, script)?;
     if commands.is_empty() {
         return None;
     }
 
-    commands.reverse();
-    let mut iter = commands.into_iter();
-    let cd_command = iter.next()?;
+    let cd_command = commands.pop()?;
     if cd_command.first().map(String::as_str) != Some("cd") {
         return None;
     }
@@ -188,7 +199,10 @@ fn split_cd_prefix_from_script(script: &str) -> Option<(String, String)> {
         return None;
     }
 
-    if iter.any(|cmd| cmd.first().map(String::as_str) == Some("cd")) {
+    if commands
+        .iter()
+        .any(|cmd| cmd.first().map(String::as_str) == Some("cd"))
+    {
         return None;
     }
 
@@ -199,37 +213,17 @@ fn split_cd_prefix_from_script(script: &str) -> Option<(String, String)> {
 
     let tokens = shlex::split(script)?;
     let rest_tokens = tokens_after_first_command(&tokens)?;
-    let rest_script = shlex::try_join(rest_tokens.iter().map(|s| s.as_str())).ok()?;
+    let rest_script = join_shell_words_preserving_operators(rest_tokens)?;
 
-    Some((workdir, rest_script))
+    Some(ShellScriptCdSplit {
+        _workdir: workdir,
+        remainder: rest_script,
+    })
 }
 
-fn split_cd_prefix_from_tokens(command: &[String]) -> Option<(String, Vec<String>)> {
-    if command.len() < 4 {
-        return None;
-    }
-
-    if command.first()?.as_str() != "cd" {
-        return None;
-    }
-
-    if command.get(2)?.as_str() != "&&" {
-        return None;
-    }
-
-    let workdir = command.get(1)?.clone();
-    let remainder = command.get(3..)?.to_vec();
-    if remainder.is_empty()
-        || remainder
-            .first()
-            .is_some_and(|first| first.as_str() == "cd" || first.starts_with("cd"))
-    {
-        return None;
-    }
-
-    Some((workdir, remainder))
-}
-
+/// Returns the tokens that follow the first command when it is chained with
+/// `&&`. If the script does not start with `cd <dir> && ...`, `None` is
+/// returned.
 fn tokens_after_first_command(tokens: &[String]) -> Option<&[String]> {
     let mut idx = 0;
     while idx < tokens.len() && tokens[idx] != "&&" {
@@ -240,12 +234,38 @@ fn tokens_after_first_command(tokens: &[String]) -> Option<&[String]> {
         return None;
     }
 
+    if tokens[idx] != "&&" {
+        return None;
+    }
+
     let rest_start = idx + 1;
     if rest_start >= tokens.len() {
         return None;
     }
 
     Some(&tokens[rest_start..])
+}
+
+fn join_shell_words_preserving_operators(tokens: &[String]) -> Option<String> {
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        if is_shell_operator(token) {
+            parts.push(token.clone());
+        } else {
+            let quoted = shlex::try_join(std::iter::once(token.as_str())).ok()?;
+            parts.push(quoted);
+        }
+    }
+
+    Some(parts.join(" "))
+}
+
+fn is_shell_operator(token: &str) -> bool {
+    matches!(token, "&&" | "||" | "|" | ";")
 }
 
 #[cfg(unix)]
@@ -361,19 +381,6 @@ mod prettify_command_for_display_tests {
     }
 
     #[test]
-    fn cd_prefix_without_shell_wrapper_is_hidden() {
-        let command = vec![
-            "cd".to_string(),
-            "foo".to_string(),
-            "&&".to_string(),
-            "git".to_string(),
-            "status".to_string(),
-        ];
-        let display = prettify_command_for_display(&command);
-        assert_eq!(display, vec!["git".to_string(), "status".to_string()]);
-    }
-
-    #[test]
     fn cd_prefix_with_additional_cd_is_preserved() {
         let command = vec![
             "bash".to_string(),
@@ -390,6 +397,61 @@ mod prettify_command_for_display_tests {
             "bash".to_string(),
             "-lc".to_string(),
             "cd and_and || echo \"couldn't find the dir for &&\"".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(display, command);
+    }
+
+    #[test]
+    fn cd_prefix_preserves_operators_between_remaining_commands() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd foo && ls && git status".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec![
+                "bash".to_string(),
+                "-lc".to_string(),
+                "ls && git status".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn cd_prefix_preserves_pipelines() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd foo && ls | rg foo".to_string(),
+        ];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(
+            display,
+            vec![
+                "bash".to_string(),
+                "-lc".to_string(),
+                "ls | rg foo".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_shell_command_is_returned_unmodified() {
+        let command = vec!["rg".to_string(), "--files".to_string()];
+        let display = prettify_command_for_display(&command);
+        assert_eq!(display, command);
+    }
+
+    #[test]
+    fn plain_cd_command_is_preserved() {
+        let command = vec![
+            "cd".to_string(),
+            "/tmp".to_string(),
+            "&&".to_string(),
+            "pwd".to_string(),
         ];
         let display = prettify_command_for_display(&command);
         assert_eq!(display, command);
