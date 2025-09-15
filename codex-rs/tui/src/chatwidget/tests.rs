@@ -813,6 +813,7 @@ async fn binary_size_transcript_snapshot() {
             s.to_string()
         }
     }
+
     let visible_after = drop_leading_thinking(&visible_after);
 
     // Snapshot the normalized visible transcript following the banner.
@@ -1572,7 +1573,7 @@ fn final_reasoning_then_message_without_deltas_are_rendered() {
     chat.handle_codex_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentReasoning(AgentReasoningEvent {
-            text: "I will first analyze the request.".into(),
+            text: "Pseudo-thought: placeholder analysis engaged.".into(),
         }),
     });
     chat.handle_codex_event(Event {
@@ -1588,6 +1589,14 @@ fn final_reasoning_then_message_without_deltas_are_rendered() {
         .iter()
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
+    assert!(
+        combined.contains("thinking"),
+        "expected reasoning header to appear in history: {combined:?}"
+    );
+    assert!(
+        combined.contains("Pseudo-thought: placeholder analysis engaged."),
+        "expected reasoning text to appear in history: {combined:?}"
+    );
     assert_snapshot!(combined);
 }
 
@@ -1599,25 +1608,25 @@ fn deltas_then_same_final_message_are_rendered_snapshot() {
     chat.handle_codex_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
-            delta: "I will ".into(),
+            delta: "Pseudo-thought: ".into(),
         }),
     });
     chat.handle_codex_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
-            delta: "first analyze the ".into(),
+            delta: "placeholder analysis ".into(),
         }),
     });
     chat.handle_codex_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
-            delta: "request.".into(),
+            delta: "engaged.".into(),
         }),
     });
     chat.handle_codex_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentReasoning(AgentReasoningEvent {
-            text: "request.".into(),
+            text: "engaged.".into(),
         }),
     });
 
@@ -1649,6 +1658,17 @@ fn deltas_then_same_final_message_are_rendered_snapshot() {
         .iter()
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
+    assert!(
+        combined.contains("thinking"),
+        "expected reasoning header to appear in history: {combined:?}"
+    );
+    let reasoning_count = combined
+        .matches("Pseudo-thought: placeholder analysis engaged.")
+        .count();
+    assert_eq!(
+        reasoning_count, 1,
+        "expected reasoning text exactly once in history: {combined:?}"
+    );
     assert_snapshot!(combined);
 }
 

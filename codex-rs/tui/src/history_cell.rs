@@ -197,6 +197,21 @@ impl HistoryCell for TranscriptOnlyHistoryCell {
 }
 
 #[derive(Debug)]
+pub(crate) struct ReasoningHistoryCell {
+    lines: Vec<Line<'static>>,
+}
+
+impl HistoryCell for ReasoningHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        word_wrap_lines(&self.lines, RtOptions::new(width as usize))
+    }
+
+    fn transcript_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct PatchHistoryCell {
     event_type: PatchEventType,
     changes: HashMap<PathBuf, FileChange>,
@@ -1351,17 +1366,19 @@ pub(crate) fn new_proposed_command(command: &[String]) -> PlainHistoryCell {
 pub(crate) fn new_reasoning_block(
     full_reasoning_buffer: String,
     config: &Config,
-) -> TranscriptOnlyHistoryCell {
+) -> ReasoningHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("thinking".magenta().italic()));
     append_markdown(&full_reasoning_buffer, &mut lines, config);
-    TranscriptOnlyHistoryCell { lines }
+    ReasoningHistoryCell { lines }
 }
 
 pub(crate) fn new_reasoning_summary_block(
     full_reasoning_buffer: String,
     config: &Config,
 ) -> Vec<Box<dyn HistoryCell>> {
+    let mut cells: Vec<Box<dyn HistoryCell>> = Vec::new();
+
     if config.model_family.reasoning_summary_format == ReasoningSummaryFormat::Experimental {
         // Experimental format is following:
         // ** header **
@@ -1369,16 +1386,16 @@ pub(crate) fn new_reasoning_summary_block(
         // reasoning summary
         //
         // So we need to strip header from reasoning summary
-        let full_reasoning_buffer = full_reasoning_buffer.trim();
-        if let Some(open) = full_reasoning_buffer.find("**") {
-            let after_open = &full_reasoning_buffer[(open + 2)..];
+        let trimmed = full_reasoning_buffer.trim();
+        if let Some(open) = trimmed.find("**") {
+            let after_open = &trimmed[(open + 2)..];
             if let Some(close) = after_open.find("**") {
                 let after_close_idx = open + 2 + close + 2;
                 // if we don't have anything beyond `after_close_idx`
                 // then we don't have a summary to inject into history
-                if after_close_idx < full_reasoning_buffer.len() {
-                    let header_buffer = full_reasoning_buffer[..after_close_idx].to_string();
-                    let summary_buffer = full_reasoning_buffer[after_close_idx..].to_string();
+                if after_close_idx < trimmed.len() {
+                    let header_buffer = trimmed[..after_close_idx].to_string();
+                    let summary_buffer = trimmed[after_close_idx..].to_string();
 
                     let mut header_lines: Vec<Line<'static>> = Vec::new();
                     header_lines.push(Line::from("Thinking".magenta().italic()));
@@ -1388,17 +1405,19 @@ pub(crate) fn new_reasoning_summary_block(
                     summary_lines.push(Line::from("Thinking".magenta().bold()));
                     append_markdown(&summary_buffer, &mut summary_lines, config);
 
-                    return vec![
-                        Box::new(TranscriptOnlyHistoryCell {
-                            lines: header_lines,
-                        }),
-                        Box::new(AgentMessageCell::new(summary_lines, true)),
-                    ];
+                    cells.push(Box::new(TranscriptOnlyHistoryCell {
+                        lines: header_lines,
+                    }));
+                    cells.push(Box::new(AgentMessageCell::new(summary_lines, true)));
                 }
             }
         }
     }
-    vec![Box::new(new_reasoning_block(full_reasoning_buffer, config))]
+
+    if cells.is_empty() {
+        cells.push(Box::new(new_reasoning_block(full_reasoning_buffer, config)));
+    }
+    cells
 }
 
 struct OutputLinesParams {

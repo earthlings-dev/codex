@@ -214,7 +214,14 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn on_agent_reasoning_final(&mut self) {
+    fn on_agent_reasoning_final(&mut self, fallback_text: Option<String>) {
+        if self.reasoning_buffer.is_empty() {
+            if let Some(text) = fallback_text {
+                if !text.is_empty() {
+                    self.reasoning_buffer.push_str(&text);
+                }
+            }
+        }
         // At the end of a reasoning block, record transcript-only content.
         self.full_reasoning_buffer.push_str(&self.reasoning_buffer);
         if !self.full_reasoning_buffer.is_empty() {
@@ -1053,10 +1060,12 @@ impl ChatWidget {
             | EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
             }) => self.on_agent_reasoning_delta(delta),
-            EventMsg::AgentReasoning(AgentReasoningEvent { .. }) => self.on_agent_reasoning_final(),
+            EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                self.on_agent_reasoning_final(Some(text))
+            }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 self.on_agent_reasoning_delta(text);
-                self.on_agent_reasoning_final()
+                self.on_agent_reasoning_final(None)
             }
             EventMsg::AgentReasoningSectionBreak(_) => self.on_reasoning_section_break(),
             EventMsg::TaskStarted(_) => self.on_task_started(),
