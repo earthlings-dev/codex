@@ -26,7 +26,10 @@ codex-exec = { path = "../exec" }
 codex-login = { path = "../login" }
 codex-mcp-server = { path = "../mcp-server" }
 codex-protocol = { path = "../protocol" }
+codex-protocol-ts = { path = "../protocol-ts" }
 codex-tui = { path = "../tui" }
+libc = "0.2"
+regex-lite = "0.1"
 serde_json = "1"
 tokio = { version = "1", features = [
     "io-std",
@@ -37,5 +40,3 @@ tokio = { version = "1", features = [
 ] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-codex-protocol-ts = { path = "../protocol-ts" }
-libc = "0.2"
