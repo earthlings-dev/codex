@@ -23,12 +23,6 @@
     (path "/dev/null")
     (vnode-type CHARACTER-DEVICE)))
 
-; common device touched by many processes (e.g., libSystem initialization)
-(allow file-write-data
-  (require-all
-    (path "/dev/dtracehelper")
-    (vnode-type CHARACTER-DEVICE)))
-
 ; sysctls permitted.
 (allow sysctl-read
   (sysctl-name "hw.activecpu")
@@ -69,9 +63,7 @@
   (sysctl-name "kern.secure_kernel")
   (sysctl-name "kern.usrstack64")
   (sysctl-name "kern.version")
-  (sysctl-name "kern.bootargs")
   (sysctl-name "sysctl.proc_cputype")
-  (sysctl-name "security.mac.lockdown_mode_state")
   (sysctl-name "vm.loadavg")
   (sysctl-name-prefix "hw.perflevel")
   (sysctl-name-prefix "kern.proc.pgrp.")
@@ -83,12 +75,6 @@
 (allow iokit-open
   (iokit-registry-entry-class "RootDomainUserClient")
 )
-
-; Allow a common ioctl used on dtracehelper during many process startups
-(allow file-ioctl
-  (require-all
-    (path "/dev/dtracehelper")
-    (vnode-type CHARACTER-DEVICE)))
 
 ; needed to look up user info, see https://crbug.com/792228
 (allow mach-lookup
