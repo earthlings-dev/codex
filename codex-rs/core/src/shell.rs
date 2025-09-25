@@ -48,7 +48,14 @@ impl Shell {
                 "-Command".to_string(),
                 script.to_string(),
             ]),
-            Shell::Unknown => None,
+            Shell::Unknown => {
+                // In CI we sometimes cannot determine the user's default shell (e.g. musl builds
+                // running under minimal passwd entries). Returning `None` here would make callers
+                // treat the entire script as a single argv[0], which prevents simple commands like
+                // `python3 -c "..."` from spawning. Instead, fall back to a POSIX-style split so we
+                // still run straightforward commands even without shell discovery.
+                shlex::split(script)
+            }
         }
     }
 
@@ -391,6 +398,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn format_user_shell_script_unknown_splits_command() {
+        let script = "python3 -c \"print('hi')\"";
+        let invocation = Shell::Unknown.format_user_shell_script(script);
+        assert_eq!(
+            invocation,
+            Some(vec![
+                "python3".to_string(),
+                "-c".to_string(),
+                "print('hi')".to_string(),
+            ])
+        );
     }
 }
 
