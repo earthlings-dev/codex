@@ -86,12 +86,18 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
         .unwrap();
     let msg = wait_for_event(&codex, |ev| matches!(ev, EventMsg::ExecCommandEnd(_))).await;
     let EventMsg::ExecCommandEnd(ExecCommandEndEvent {
-        stdout, exit_code, ..
+        mut stdout,
+        exit_code,
+        ..
     }) = msg
     else {
         unreachable!()
     };
     assert_eq!(exit_code, 0);
+    if cfg!(windows) {
+        // Windows' Python writes CRLF line endings; normalize so the assertion remains portable.
+        stdout = stdout.replace("\r\n", "\n");
+    }
     assert_eq!(stdout, contents);
 }
 
