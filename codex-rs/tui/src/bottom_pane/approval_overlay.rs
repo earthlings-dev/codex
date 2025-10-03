@@ -13,8 +13,10 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
+use crate::render::Insets;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::ColumnRenderable;
+use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
 use crate::text_formatting::truncate_text;
 use codex_core::protocol::FileChange;
@@ -315,7 +317,10 @@ impl From<ApprovalRequest> for ApprovalRequestState {
                 changes,
             } => {
                 let mut header: Vec<Box<dyn Renderable>> = Vec::new();
-                header.push(DiffSummary::new(changes, cwd).into());
+                header.push(Box::new(InsetRenderable::new(
+                    DiffSummary::new(changes, cwd).into(),
+                    Insets::tlbr(0, 4, 0, 0),
+                )));
                 if let Some(reason) = reason
                     && !reason.is_empty()
                 {
