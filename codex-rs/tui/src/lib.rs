@@ -13,9 +13,6 @@ use codex_core::INTERACTIVE_SESSION_SOURCES;
 use codex_core::RolloutRecorder;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
-use codex_core::config::ConfigToml;
-use codex_core::config::find_codex_home;
-use codex_core::config::load_config_as_toml_with_cli_overrides;
 use codex_core::find_conversation_path_by_id_str;
 use codex_core::protocol::AskForApproval;
 use codex_ollama::DEFAULT_OSS_MODEL;
@@ -159,34 +156,7 @@ pub async fn run_main(
 
     let config = load_config_or_exit(cli_kv_overrides.clone(), overrides.clone());
 
-    // TODO(dylan): expose project in Config, migrate active_profile below to use Config,
-    // and remove use of config_toml in tui
-    #[allow(clippy::print_stderr)]
-    let config_toml = {
-        let codex_home = match find_codex_home() {
-            Ok(codex_home) => codex_home,
-            Err(err) => {
-                eprintln!("Error finding codex home: {err}");
-                std::process::exit(1);
-            }
-        };
-
-        match load_config_as_toml_with_cli_overrides(&codex_home, cli_kv_overrides.clone()) {
-            Ok(config_toml) => config_toml,
-            Err(err) => {
-                eprintln!("Error loading config.toml: {err}");
-                std::process::exit(1);
-            }
-        }
-    };
-
-    let cli_profile_override = cli.config_profile.clone();
-    let active_profile = cli_profile_override
-        .clone()
-        .or_else(|| config_toml.profile.clone());
-
-    let should_show_trust_screen = determine_repo_trust_state(&config, &config_toml);
-
+    let active_profile = config.active_profile.clone();
     let log_dir = codex_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
     // Open (or create) your log file, appending to it.
@@ -252,25 +222,17 @@ pub async fn run_main(
         let _ = tracing_subscriber::registry().with(file_layer).try_init();
     };
 
-    run_ratatui_app(
-        cli,
-        config,
-        overrides,
-        cli_kv_overrides,
-        active_profile,
-        should_show_trust_screen,
-    )
-    .await
-    .map_err(|err| std::io::Error::other(err.to_string()))
+    run_ratatui_app(cli, config, overrides, cli_kv_overrides, active_profile)
+        .await
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
 async fn run_ratatui_app(
     cli: Cli,
-    mut config: Config,
+    initial_config: Config,
     overrides: ConfigOverrides,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     active_profile: Option<String>,
-    should_show_trust_screen: bool,
 ) -> color_eyre::Result<AppExitInfo> {
     color_eyre::install()?;
 
@@ -351,29 +313,33 @@ async fn run_ratatui_app(
     }
 
     // Initialize high-fidelity session event logging if enabled.
-    session_log::maybe_init(&config);
+    session_log::maybe_init(&initial_config);
 
-    let auth_manager = AuthManager::shared(config.codex_home.clone(), false);
-    let login_status = get_login_status(&config);
+    let auth_manager = AuthManager::shared(initial_config.codex_home.clone(), false);
+    let login_status = get_login_status(&initial_config);
+    let should_show_trust_screen = should_show_trust_screen(&initial_config);
     let should_show_onboarding =
-        should_show_onboarding(login_status, &config, should_show_trust_screen);
-    if should_show_onboarding {
-        let directory_trust_decision = run_onboarding_app(
+        should_show_onboarding(login_status, &initial_config, should_show_trust_screen);
+
+    let config = if should_show_onboarding
+        && let Some(directory_trust_decision) = run_onboarding_app(
             OnboardingScreenArgs {
-                show_login_screen: should_show_login_screen(login_status, &config),
+                show_login_screen: should_show_login_screen(login_status, &initial_config),
                 show_trust_screen: should_show_trust_screen,
                 login_status,
                 auth_manager: auth_manager.clone(),
-                config: config.clone(),
+                config: initial_config.clone(),
             },
             &mut tui,
         )
-        .await?;
-        if let Some(TrustDirectorySelection::Trust) = directory_trust_decision {
-            // if the user made an explicit decision to trust the directory, reload the config
-            config = load_config_or_exit(cli_kv_overrides, overrides);
-        }
-    }
+        .await?
+        && directory_trust_decision == TrustDirectorySelection::Trust
+    {
+        // if the user made an explicit decision to trust the directory, reload the config
+        load_config_or_exit(cli_kv_overrides, overrides)
+    } else {
+        initial_config
+    };
 
     // Determine resume behavior: explicit id, then resume last, then picker.
     let resume_selection = if let Some(id_str) = cli.resume_session_id.as_deref() {
@@ -489,12 +455,12 @@ fn load_config_or_exit(
 /// Determine if user has configured a sandbox / approval policy,
 /// or if the current cwd project is already trusted. If not, we need to
 /// show the trust screen.
-fn determine_repo_trust_state(config: &Config, config_toml: &ConfigToml) -> bool {
+fn should_show_trust_screen(config: &Config) -> bool {
     if config.did_user_set_custom_approval_policy_or_sandbox_mode {
         // if the user has overridden either approval policy or sandbox mode,
         // skip the trust flow
         false
-    } else if config_toml.is_cwd_trusted(&config.cwd) {
+    } else if config.active_project.is_trusted() {
         // if the current cwd project is already trusted, Config derives the policy.
         // skip the trust flow
         false
