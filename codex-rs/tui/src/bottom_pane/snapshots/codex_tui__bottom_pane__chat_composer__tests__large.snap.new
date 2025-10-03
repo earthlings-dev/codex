@@ -1,14 +1,15 @@
 ---
 source: tui/src/bottom_pane/chat_composer.rs
+assertion_line: 2153
 expression: terminal.backend()
 ---
 "                                                                                                    "
-"› Ask Codex to do anything                                                                          "
+"› [Pasted Content 1005 chars]                                                                       "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
-"  esc esc to edit previous message                                                 100% context left"
 "                                                                                                    "
+"                                                                                  100% context left "
