@@ -75,24 +75,29 @@ pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
     // present.
     if !matches!(props.mode, FooterMode::ShortcutOverlay) && lines.len() >= 2 {
         let mut left = lines.remove(0);
-        let right = lines.pop().unwrap();
-        let left_width = left.width();
-        let right_width = right.width();
-        let total_width = area.width as usize;
-        let pad = total_width.saturating_sub(left_width + right_width);
-        if pad > 0 {
-            left.spans.push(Span::from(" ".repeat(pad)));
+        if let Some(right) = lines.pop() {
+            let left_width = left.width();
+            let right_width = right.width();
+            let total_width = area.width as usize;
+            let pad = total_width.saturating_sub(left_width + right_width);
+            if pad > 0 {
+                left.spans.push(Span::from(" ".repeat(pad)));
+            }
+            left.spans.extend(right.spans);
+            lines = vec![left];
+        } else {
+            // Should be unreachable given the len() check, but restore `left` just in case.
+            lines.insert(0, left);
         }
-        left.spans.extend(right.spans);
-        lines = vec![left];
-    } else if !matches!(props.mode, FooterMode::ShortcutOverlay) && lines.last_mut().is_some() {
-        let last = lines.last_mut().unwrap();
-        // Otherwise, keep the context line on its own row but right-align it.
-        let line_width = last.width();
-        let total_width = area.width as usize;
-        if total_width > line_width {
-            let pad = total_width - line_width;
-            last.spans.insert(1, Span::from(" ".repeat(pad)));
+    } else if !matches!(props.mode, FooterMode::ShortcutOverlay) {
+        if let Some(last) = lines.last_mut() {
+            // Otherwise, keep the context line on its own row but right-align it.
+            let line_width = last.width();
+            let total_width = area.width as usize;
+            if total_width > line_width {
+                let pad = total_width - line_width;
+                last.spans.insert(1, Span::from(" ".repeat(pad)));
+            }
         }
     }
 
@@ -255,7 +260,7 @@ fn build_columns(entries: Vec<Line<'static>>) -> Vec<Line<'static>> {
 
 fn context_window_line(percent: Option<u8>) -> Line<'static> {
     let percent = percent.unwrap_or(100);
-    let spans: Vec<Span<'static>> = vec![format!("{percent}% context left ").dim()];
+    let spans: Vec<Span<'static>> = vec![format!("{percent}% context left").dim()];
     let mut line = Line::from(spans);
     line.alignment = Some(Alignment::Right);
     line
