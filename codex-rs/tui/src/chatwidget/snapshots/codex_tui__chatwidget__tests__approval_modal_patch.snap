@@ -4,12 +4,12 @@ expression: terminal.backend().vt100().screen().contents()
 ---
   Would you like to make the following edits?
 
-      README.md (+2 -0)
+  Reason: The model wants to apply changes
 
-      1 +hello
-      2 +world
+  README.md (+2 -0)
 
-  The model wants to apply changes
+    1 +hello
+    2 +world
 
 › 1. Yes, proceed
   2. No, and tell Codex what to do differently esc
