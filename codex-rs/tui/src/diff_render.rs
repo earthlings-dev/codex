@@ -379,7 +379,7 @@ fn push_wrapped_diff_line(
             first = false;
         } else {
             // Continuation lines keep a space for the sign column so content aligns
-            let gutter = format!("{:width$} ", "", width = gutter_width);
+            let gutter = format!("{:gutter_width$}  ", "");
             lines.push(RtLine::from(vec![
                 RtSpan::styled(gutter, style_gutter()),
                 RtSpan::styled(chunk.to_string(), line_style),
