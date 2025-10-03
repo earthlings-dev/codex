@@ -72,7 +72,7 @@ pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
 
     // In all modes except the multi‑line ShortcutOverlay, merge the primary
     // hint with the right‑aligned context into a single row when both are
-    // present. This avoids stacking one‑line hints above the context.
+    // present.
     if !matches!(props.mode, FooterMode::ShortcutOverlay) && lines.len() >= 2 {
         let mut left = lines.remove(0);
         let right = lines.pop().unwrap();
