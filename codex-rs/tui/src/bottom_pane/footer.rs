@@ -89,8 +89,8 @@ pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
             // Should be unreachable given the len() check, but restore `left` just in case.
             lines.insert(0, left);
         }
-    } else if !matches!(props.mode, FooterMode::ShortcutOverlay) {
-        if let Some(last) = lines.last_mut() {
+    } else if !matches!(props.mode, FooterMode::ShortcutOverlay)
+        && let Some(last) = lines.last_mut() {
             // Otherwise, keep the context line on its own row but right-align it.
             let line_width = last.width();
             let total_width = area.width as usize;
@@ -99,7 +99,6 @@ pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
                 last.spans.insert(1, Span::from(" ".repeat(pad)));
             }
         }
-    }
 
     Paragraph::new(lines).render(area, buf);
 }
