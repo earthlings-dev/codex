@@ -13,8 +13,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::exec_command::relativize_to_home;
+use crate::render::Insets;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::ColumnRenderable;
+use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::protocol::FileChange;
@@ -64,7 +66,10 @@ impl From<DiffSummary> for Box<dyn Renderable> {
             path.extend(render_line_count_summary(row.added, row.removed));
             rows.push(Box::new(path));
             rows.push(Box::new(RtLine::from("")));
-            rows.push(Box::new(row.change));
+            rows.push(Box::new(InsetRenderable::new(
+                Box::new(row.change),
+                Insets::tlbr(0, 2, 0, 0),
+            )));
         }
 
         Box::new(ColumnRenderable::new(rows))
@@ -181,7 +186,7 @@ fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtL
         }
 
         let mut lines = vec![];
-        render_change(&r.change, &mut lines, wrap_cols);
+        render_change(&r.change, &mut lines, wrap_cols - 4);
         out.extend(prefix_lines(lines, "    ".into(), "    ".into()));
     }
 

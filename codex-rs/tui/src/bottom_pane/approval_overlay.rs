@@ -13,10 +13,8 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
-use crate::render::Insets;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::ColumnRenderable;
-use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
 use crate::text_formatting::truncate_text;
 use codex_core::protocol::FileChange;
@@ -317,18 +315,16 @@ impl From<ApprovalRequest> for ApprovalRequestState {
                 changes,
             } => {
                 let mut header: Vec<Box<dyn Renderable>> = Vec::new();
-                header.push(Box::new(InsetRenderable::new(
-                    DiffSummary::new(changes, cwd).into(),
-                    Insets::tlbr(0, 4, 0, 0),
-                )));
                 if let Some(reason) = reason
                     && !reason.is_empty()
                 {
-                    header.push(Box::new(Line::from("")));
                     header.push(Box::new(
-                        Paragraph::new(reason.italic()).wrap(Wrap { trim: false }),
+                        Paragraph::new(Line::from_iter(["Reason: ".into(), reason.italic()]))
+                            .wrap(Wrap { trim: false }),
                     ));
+                    header.push(Box::new(Line::from("")));
                 }
+                header.push(DiffSummary::new(changes, cwd).into());
                 Self {
                     variant: ApprovalVariant::ApplyPatch { id },
                     header: Box::new(ColumnRenderable::new(header)),
