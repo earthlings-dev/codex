@@ -611,12 +611,35 @@ mod tests {
             },
         );
 
-        let mut lines = create_diff_summary(&changes, &PathBuf::from("/"), 28);
-        // Drop the combined header for this text-only snapshot
-        if !lines.is_empty() {
-            lines.remove(0);
-        }
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 28);
         snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_block_line_numbers_three_digits_text() {
+        let original = (1..=110).map(|i| format!("line {i}\n")).collect::<String>();
+        let modified = (1..=110)
+            .map(|i| {
+                if i == 100 {
+                    format!("line {i} changed\n")
+                } else {
+                    format!("line {i}\n")
+                }
+            })
+            .collect::<String>();
+        let patch = diffy::create_patch(&original, &modified).to_string();
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            PathBuf::from("hundreds.txt"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80);
+        snapshot_lines_text("apply_update_block_line_numbers_three_digits_text", &lines);
     }
 
     #[test]
