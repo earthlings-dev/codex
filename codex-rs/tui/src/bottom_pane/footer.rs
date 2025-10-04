@@ -4,7 +4,6 @@ use crate::render::line_utils::prefix_lines;
 use crate::ui_consts::FOOTER_INDENT_COLS;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -64,74 +63,54 @@ pub(crate) fn footer_height(props: FooterProps) -> u16 {
 }
 
 pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
-    let mut lines = prefix_lines(
+    let lines = prefix_lines(
         footer_lines(props),
         " ".repeat(FOOTER_INDENT_COLS).into(),
         " ".repeat(FOOTER_INDENT_COLS).into(),
     );
-
-    // In all modes except the multi‑line ShortcutOverlay, merge the primary
-    // hint with the right‑aligned context into a single row when both are
-    // present.
-    if !matches!(props.mode, FooterMode::ShortcutOverlay) && lines.len() >= 2 {
-        let mut left = lines.remove(0);
-        if let Some(right) = lines.pop() {
-            let left_width = left.width();
-            let right_width = right.width();
-            let total_width = area.width as usize;
-            let pad = total_width.saturating_sub(left_width + right_width);
-            if pad > 0 {
-                left.spans.push(Span::from(" ".repeat(pad)));
-            }
-            left.spans.extend(right.spans);
-            lines = vec![left];
-        } else {
-            // Should be unreachable given the len() check, but restore `left` just in case.
-            lines.insert(0, left);
-        }
-    } else if !matches!(props.mode, FooterMode::ShortcutOverlay)
-        && let Some(last) = lines.last_mut() {
-            // Otherwise, keep the context line on its own row but right-align it.
-            let line_width = last.width();
-            let total_width = area.width as usize;
-            if total_width > line_width {
-                let pad = total_width - line_width;
-                last.spans.insert(1, Span::from(" ".repeat(pad)));
-            }
-        }
-
     Paragraph::new(lines).render(area, buf);
 }
 
 fn footer_lines(props: FooterProps) -> Vec<Line<'static>> {
-    let mut lines = match props.mode {
-        FooterMode::CtrlCReminder => vec![ctrl_c_reminder_line(CtrlCReminderState {
-            is_task_running: props.is_task_running,
-        })],
-        FooterMode::ShortcutPrompt => {
-            if props.is_task_running {
-                Vec::new()
-            } else {
-                vec![Line::from(vec![
-                    key_hint::plain(KeyCode::Char('?')).into(),
-                    " for shortcuts".dim(),
-                ])]
-            }
-        }
+    // Show the context indicator on the left, appended after the primary hint
+    // (e.g., "? for shortcuts"). Keep it visible even when typing (i.e., when
+    // the shortcut hint is hidden). Hide it only for the multi-line
+    // ShortcutOverlay.
+    match props.mode {
         FooterMode::ShortcutOverlay => shortcut_overlay_lines(ShortcutsState {
             use_shift_enter_hint: props.use_shift_enter_hint,
             esc_backtrack_hint: props.esc_backtrack_hint,
         }),
-        FooterMode::EscHint => vec![esc_hint_line(props.esc_backtrack_hint)],
-        FooterMode::Empty => Vec::new(),
-    };
-
-    // Hide the context indicator when the multi-line shortcuts overlay is
-    // visible (triggered by '?'). In all other modes, show it.
-    if !matches!(props.mode, FooterMode::ShortcutOverlay) {
-        lines.push(context_window_line(props.context_window_percent));
+        FooterMode::CtrlCReminder => {
+            let mut line = ctrl_c_reminder_line(CtrlCReminderState {
+                is_task_running: props.is_task_running,
+            });
+            append_context_span(&mut line, props.context_window_percent);
+            vec![line]
+        }
+        FooterMode::EscHint => {
+            let mut line = esc_hint_line(props.esc_backtrack_hint);
+            append_context_span(&mut line, props.context_window_percent);
+            vec![line]
+        }
+        FooterMode::ShortcutPrompt => {
+            if props.is_task_running {
+                // While a task is running, suppress the shortcut hint but still show context.
+                vec![context_window_only_line(props.context_window_percent)]
+            } else {
+                // Context first, then the "? for shortcuts" hint.
+                let mut line = Line::from("");
+                append_context_span(&mut line, props.context_window_percent);
+                line.push_span(" · ".dim());
+                line.extend(vec![
+                    key_hint::plain(KeyCode::Char('?')).into(),
+                    " for shortcuts".dim(),
+                ]);
+                vec![line]
+            }
+        }
+        FooterMode::Empty => vec![context_window_only_line(props.context_window_percent)],
     }
-    lines
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -257,12 +236,18 @@ fn build_columns(entries: Vec<Line<'static>>) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn context_window_line(percent: Option<u8>) -> Line<'static> {
-    let percent = percent.unwrap_or(100);
-    let spans: Vec<Span<'static>> = vec![format!("{percent}% context left").dim()];
-    let mut line = Line::from(spans);
-    line.alignment = Some(Alignment::Right);
+fn context_window_only_line(percent: Option<u8>) -> Line<'static> {
+    let mut line = Line::from("");
+    append_context_span(&mut line, percent);
     line
+}
+
+fn append_context_span(line: &mut Line<'static>, percent: Option<u8>) {
+    let percent = percent.unwrap_or(100);
+    if !line.spans.is_empty() {
+        line.push_span(Span::from("   "));
+    }
+    line.push_span(Span::from(format!("{percent}% context left")).dim());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
