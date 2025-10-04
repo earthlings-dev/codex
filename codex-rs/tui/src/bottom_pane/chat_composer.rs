@@ -1527,7 +1527,7 @@ impl WidgetRef for ChatComposer {
                         if !spans.is_empty() {
                             spans.push("   ".into());
                         }
-                        spans.push(format!("{percent}% context left").dim().into());
+                        spans.push(format!("{percent}% context left").dim());
                         let mut custom_rect = hint_rect;
                         if custom_rect.width > 2 {
                             custom_rect.x += 2;
