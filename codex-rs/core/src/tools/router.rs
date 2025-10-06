@@ -16,6 +16,7 @@ use codex_protocol::models::LocalShellAction;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ShellToolCallParams;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct ToolCall {
@@ -145,17 +146,19 @@ impl ToolRouter {
         let payload_outputs_custom = matches!(payload, ToolPayload::Custom { .. });
         let failure_call_id = call_id.clone();
 
+        info!("Tool call started: {} {}", call_id, tool_name);
+
         let invocation = ToolInvocation {
             session,
             turn,
             tracker,
             sub_id,
-            call_id,
-            tool_name,
+            call_id: call_id.clone(),
+            tool_name: tool_name.clone(),
             payload,
         };
 
-        match self.registry.dispatch(invocation).await {
+        let result = match self.registry.dispatch(invocation).await {
             Ok(response) => Ok(response),
             Err(FunctionCallError::Fatal(message)) => Err(FunctionCallError::Fatal(message)),
             Err(err) => Ok(Self::failure_response(
@@ -163,7 +166,14 @@ impl ToolRouter {
                 payload_outputs_custom,
                 err,
             )),
-        }
+        };
+        info!(
+            "Tool call ended: {} {}, success: {}",
+            tool_name,
+            call_id,
+            result.is_ok()
+        );
+        result
     }
 
     fn failure_response(
