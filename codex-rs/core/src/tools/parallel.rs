@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use tokio::task::JoinHandle;
+use futures::lock::Mutex;
+use tokio::sync::RwLock;
+use tokio::sync::oneshot;
+use tokio_util::either::Either;
+use tokio_util::task::AbortOnDropHandle;
 
 use crate::codex::Session;
 use crate::codex::TurnContext;
@@ -11,20 +15,14 @@ use crate::tools::router::ToolCall;
 use crate::tools::router::ToolRouter;
 use codex_protocol::models::ResponseInputItem;
 
-use crate::codex::ProcessedResponseItem;
-
-struct PendingToolCall {
-    index: usize,
-    handle: JoinHandle<Result<ResponseInputItem, FunctionCallError>>,
-}
-
 pub(crate) struct ToolCallRuntime {
     router: Arc<ToolRouter>,
     session: Arc<Session>,
     turn_context: Arc<TurnContext>,
     tracker: SharedTurnDiffTracker,
     sub_id: String,
-    pending_calls: Vec<PendingToolCall>,
+    lock: Arc<RwLock<bool>>,
+    pending_calls: Arc<Mutex<Vec<AbortOnDropHandle<()>>>>,
 }
 
 impl ToolCallRuntime {
@@ -41,97 +39,57 @@ impl ToolCallRuntime {
             turn_context,
             tracker,
             sub_id,
-            pending_calls: Vec::new(),
+            lock: Arc::new(RwLock::new(false)),
+            pending_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub(crate) async fn handle_tool_call(
-        &mut self,
+        &self,
         call: ToolCall,
-        output_index: usize,
-        output: &mut [ProcessedResponseItem],
-    ) -> Result<(), CodexErr> {
+    ) -> Result<ResponseInputItem, CodexErr> {
         let supports_parallel = self.router.tool_supports_parallel(&call.tool_name);
-        if supports_parallel {
-            self.spawn_parallel(call, output_index);
-        } else {
-            self.resolve_pending(output).await?;
-            let response = self.dispatch_serial(call).await?;
-            let slot = output.get_mut(output_index).ok_or_else(|| {
-                CodexErr::Fatal(format!("tool output index {output_index} out of bounds"))
-            })?;
-            slot.response = Some(response);
-        }
 
-        Ok(())
-    }
-
-    pub(crate) fn abort_all(&mut self) {
-        while let Some(pending) = self.pending_calls.pop() {
-            pending.handle.abort();
+        match self.spawn(call, supports_parallel).await {
+            Ok(response) => Ok(response),
+            Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
+            Err(other) => Err(CodexErr::Fatal(other.to_string())),
         }
     }
 
-    pub(crate) async fn resolve_pending(
-        &mut self,
-        output: &mut [ProcessedResponseItem],
-    ) -> Result<(), CodexErr> {
-        while let Some(PendingToolCall { index, handle }) = self.pending_calls.pop() {
-            match handle.await {
-                Ok(Ok(response)) => {
-                    if let Some(slot) = output.get_mut(index) {
-                        slot.response = Some(response);
-                    }
-                }
-                Ok(Err(FunctionCallError::Fatal(message))) => {
-                    self.abort_all();
-                    return Err(CodexErr::Fatal(message));
-                }
-                Ok(Err(other)) => {
-                    self.abort_all();
-                    return Err(CodexErr::Fatal(other.to_string()));
-                }
-                Err(join_err) => {
-                    self.abort_all();
-                    return Err(CodexErr::Fatal(format!(
-                        "tool task failed to join: {join_err}"
-                    )));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn spawn_parallel(&mut self, call: ToolCall, index: usize) {
+    async fn spawn(
+        &self,
+        call: ToolCall,
+        supports_parallel: bool,
+    ) -> Result<ResponseInputItem, FunctionCallError> {
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
         let tracker = Arc::clone(&self.tracker);
         let sub_id = self.sub_id.clone();
+        let (tx, rx) = oneshot::channel();
+        let lock = self.lock.clone();
         let handle = tokio::spawn(async move {
-            router
-                .dispatch_tool_call(session, turn, tracker, sub_id, call)
-                .await
-        });
-        self.pending_calls.push(PendingToolCall { index, handle });
-    }
+            let _guard = if supports_parallel {
+                Either::Left(lock.read().await)
+            } else {
+                Either::Right(lock.write().await)
+            };
 
-    async fn dispatch_serial(&self, call: ToolCall) -> Result<ResponseInputItem, CodexErr> {
-        match self
-            .router
-            .dispatch_tool_call(
-                Arc::clone(&self.session),
-                Arc::clone(&self.turn_context),
-                Arc::clone(&self.tracker),
-                self.sub_id.clone(),
-                call,
-            )
+            let _ = tx.send(
+                router
+                    .dispatch_tool_call(session, turn, tracker, sub_id, call)
+                    .await,
+            );
+        });
+
+        self.pending_calls
+            .lock()
             .await
-        {
-            Ok(response) => Ok(response),
-            Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
-            Err(other) => Err(CodexErr::Fatal(other.to_string())),
-        }
+            .push(AbortOnDropHandle::new(handle));
+
+        rx.await.map_err(|err| {
+            FunctionCallError::Fatal(format!("tool task failed to receive: {err:?}"))
+        })?
     }
 }
