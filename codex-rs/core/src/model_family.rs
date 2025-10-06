@@ -77,6 +77,7 @@ macro_rules! model_family {
 
 /// Returns a `ModelFamily` for the given model slug, or `None` if the slug
 /// does not match any known model family.
+#[allow(clippy::if_same_then_else)]
 pub fn find_family_for_model(mut slug: &str) -> Option<ModelFamily> {
     // TODO(jif) clean once we have proper feature flags
     if matches!(std::env::var("CODEX_EXPERIMENTAL").as_deref(), Ok("1")) {
