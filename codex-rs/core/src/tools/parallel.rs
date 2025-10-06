@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use futures::lock::Mutex;
 use tokio::sync::RwLock;
 use tokio_util::either::Either;
 use tokio_util::task::AbortOnDropHandle;
