@@ -145,6 +145,8 @@ pub fn find_family_for_model(mut slug: &str) -> Option<ModelFamily> {
             reasoning_summary_format: ReasoningSummaryFormat::Experimental,
             base_instructions: GPT_5_CODEX_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+            experimental_supported_tools: vec!["read_file".to_string()],
+            supports_parallel_tool_calls: true,
         )
     } else if slug.starts_with("gpt-5") {
         model_family!(
