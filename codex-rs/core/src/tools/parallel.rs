@@ -21,7 +21,6 @@ pub(crate) struct ToolCallRuntime {
     tracker: SharedTurnDiffTracker,
     sub_id: String,
     lock: Arc<RwLock<bool>>,
-    pending_calls: Arc<Mutex<Vec<AbortOnDropHandle<()>>>>,
 }
 
 impl ToolCallRuntime {
@@ -39,7 +38,6 @@ impl ToolCallRuntime {
             tracker,
             sub_id,
             lock: Arc::new(RwLock::new(false)),
-            pending_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
