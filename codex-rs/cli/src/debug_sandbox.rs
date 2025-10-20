@@ -100,6 +100,8 @@ async fn run_command_under_sandbox(
 
     #[cfg(target_os = "macos")]
     let mut denial_logger = log_denials.then(DenialLogger::new).flatten();
+    #[cfg(not(target_os = "macos"))]
+    let _ = log_denials;
 
     let mut child = match sandbox_type {
         SandboxType::Seatbelt => {
