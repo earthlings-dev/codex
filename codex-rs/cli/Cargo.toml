@@ -41,6 +41,7 @@ owo-colors = { workspace = true }
 regex-lite = { workspace = true}
 serde_json = { workspace = true }
 supports-color = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true, features = [
     "io-std",
     "macros",

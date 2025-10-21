@@ -990,6 +990,7 @@ dependencies = [
  "supports-color",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
