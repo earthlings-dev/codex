@@ -8,9 +8,10 @@ use serde::Serialize;
 use serde::ser::Serializer;
 use ts_rs::TS;
 
-use crate::protocol::InputItem;
+use crate::user_input::UserInput;
+use schemars::JsonSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputItem {
     Message {
@@ -31,7 +32,7 @@ pub enum ResponseInputItem {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentItem {
     InputText { text: String },
@@ -39,7 +40,7 @@ pub enum ContentItem {
     OutputText { text: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseItem {
     Message {
@@ -159,7 +160,7 @@ impl From<ResponseInputItem> for ResponseItem {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalShellStatus {
     Completed,
@@ -167,13 +168,13 @@ pub enum LocalShellStatus {
     Incomplete,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LocalShellAction {
     Exec(LocalShellExecAction),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 pub struct LocalShellExecAction {
     pub command: Vec<String>,
     pub timeout_ms: Option<u64>,
@@ -182,7 +183,7 @@ pub struct LocalShellExecAction {
     pub user: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WebSearchAction {
     Search {
@@ -192,29 +193,29 @@ pub enum WebSearchAction {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReasoningItemReasoningSummary {
     SummaryText { text: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReasoningItemContent {
     ReasoningText { text: String },
     Text { text: String },
 }
 
-impl From<Vec<InputItem>> for ResponseInputItem {
-    fn from(items: Vec<InputItem>) -> Self {
+impl From<Vec<UserInput>> for ResponseInputItem {
+    fn from(items: Vec<UserInput>) -> Self {
         Self::Message {
             role: "user".to_string(),
             content: items
                 .into_iter()
                 .filter_map(|c| match c {
-                    InputItem::Text { text } => Some(ContentItem::InputText { text }),
-                    InputItem::Image { image_url } => Some(ContentItem::InputImage { image_url }),
-                    InputItem::LocalImage { path } => match std::fs::read(&path) {
+                    UserInput::Text { text } => Some(ContentItem::InputText { text }),
+                    UserInput::Image { image_url } => Some(ContentItem::InputImage { image_url }),
+                    UserInput::LocalImage { path } => match std::fs::read(&path) {
                         Ok(bytes) => {
                             let mime = mime_guess::from_path(&path)
                                 .first()
@@ -242,7 +243,7 @@ impl From<Vec<InputItem>> for ResponseInputItem {
 
 /// If the `name` of a `ResponseItem::FunctionCall` is either `container.exec`
 /// or shell`, the `arguments` field should deserialize to this struct.
-#[derive(Deserialize, Debug, Clone, PartialEq, TS)]
+#[derive(Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 pub struct ShellToolCallParams {
     pub command: Vec<String>,
     pub workdir: Option<String>,
@@ -256,9 +257,10 @@ pub struct ShellToolCallParams {
     pub justification: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, TS)]
+#[derive(Debug, Clone, PartialEq, JsonSchema, TS)]
 pub struct FunctionCallOutputPayload {
     pub content: String,
+    // TODO(jif) drop this.
     pub success: Option<bool>,
 }
 
@@ -318,9 +320,10 @@ impl std::ops::Deref for FunctionCallOutputPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn serializes_success_as_plain_string() {
+    fn serializes_success_as_plain_string() -> Result<()> {
         let item = ResponseInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: FunctionCallOutputPayload {
@@ -329,15 +332,16 @@ mod tests {
             },
         };
 
-        let json = serde_json::to_string(&item).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&item)?;
+        let v: serde_json::Value = serde_json::from_str(&json)?;
 
         // Success case -> output should be a plain string
         assert_eq!(v.get("output").unwrap().as_str().unwrap(), "ok");
+        Ok(())
     }
 
     #[test]
-    fn serializes_failure_as_string() {
+    fn serializes_failure_as_string() -> Result<()> {
         let item = ResponseInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: FunctionCallOutputPayload {
@@ -346,21 +350,22 @@ mod tests {
             },
         };
 
-        let json = serde_json::to_string(&item).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&item)?;
+        let v: serde_json::Value = serde_json::from_str(&json)?;
 
         assert_eq!(v.get("output").unwrap().as_str().unwrap(), "bad");
+        Ok(())
     }
 
     #[test]
-    fn deserialize_shell_tool_call_params() {
+    fn deserialize_shell_tool_call_params() -> Result<()> {
         let json = r#"{
             "command": ["ls", "-l"],
             "workdir": "/tmp",
             "timeout": 1000
         }"#;
 
-        let params: ShellToolCallParams = serde_json::from_str(json).unwrap();
+        let params: ShellToolCallParams = serde_json::from_str(json)?;
         assert_eq!(
             ShellToolCallParams {
                 command: vec!["ls".to_string(), "-l".to_string()],
@@ -371,5 +376,6 @@ mod tests {
             },
             params
         );
+        Ok(())
     }
 }

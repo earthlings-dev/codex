@@ -1,13 +1,18 @@
 use std::io::BufRead;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::AuthManager;
-use crate::auth::CodexAuth;
 use bytes::Bytes;
-use codex_protocol::mcp_protocol::AuthMode;
-use codex_protocol::mcp_protocol::ConversationId;
+use chrono::DateTime;
+use chrono::Utc;
+use codex_app_server_protocol::AuthMode;
+use codex_otel::otel_event_manager::OtelEventManager;
+use codex_protocol::ConversationId;
+use codex_protocol::config_types::ReasoningEffort as ReasoningEffortConfig;
+use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 use regex_lite::Regex;
@@ -23,6 +28,8 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 
+use crate::AuthManager;
+use crate::auth::CodexAuth;
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
 use crate::client_common::Prompt;
@@ -34,22 +41,24 @@ use crate::client_common::create_text_param_for_request;
 use crate::config::Config;
 use crate::default_client::create_client;
 use crate::error::CodexErr;
+use crate::error::ConnectionFailedError;
+use crate::error::ResponseStreamFailed;
 use crate::error::Result;
+use crate::error::RetryLimitReachedError;
+use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::ModelFamily;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::openai_model_info::get_model_info;
-use crate::openai_tools::create_tools_json_for_responses_api;
-use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::RateLimitSnapshot;
+use crate::protocol::RateLimitWindow;
 use crate::protocol::TokenUsage;
+use crate::state::TaskKind;
 use crate::token_data::PlanType;
+use crate::tools::spec::create_tools_json_for_responses_api;
 use crate::util::backoff;
-use codex_protocol::config_types::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use codex_protocol::models::ResponseItem;
-use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -59,19 +68,19 @@ struct ErrorResponse {
 #[derive(Debug, Deserialize)]
 struct Error {
     r#type: Option<String>,
-    #[allow(dead_code)]
     code: Option<String>,
     message: Option<String>,
 
     // Optional fields available on "usage_limit_reached" and "usage_not_included" errors
     plan_type: Option<PlanType>,
-    resets_in_seconds: Option<u64>,
+    resets_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     config: Arc<Config>,
     auth_manager: Option<Arc<AuthManager>>,
+    otel_event_manager: OtelEventManager,
     client: reqwest::Client,
     provider: ModelProviderInfo,
     conversation_id: ConversationId,
@@ -83,6 +92,7 @@ impl ModelClient {
     pub fn new(
         config: Arc<Config>,
         auth_manager: Option<Arc<AuthManager>>,
+        otel_event_manager: OtelEventManager,
         provider: ModelProviderInfo,
         effort: Option<ReasoningEffortConfig>,
         summary: ReasoningSummaryConfig,
@@ -93,6 +103,7 @@ impl ModelClient {
         Self {
             config,
             auth_manager,
+            otel_event_manager,
             client,
             provider,
             conversation_id,
@@ -101,10 +112,12 @@ impl ModelClient {
         }
     }
 
-    pub fn get_model_context_window(&self) -> Option<u64> {
+    pub fn get_model_context_window(&self) -> Option<i64> {
+        let pct = self.config.model_family.effective_context_window_percent;
         self.config
             .model_context_window
             .or_else(|| get_model_info(&self.config.model_family).map(|info| info.context_window))
+            .map(|w| w.saturating_mul(pct) / 100)
     }
 
     pub fn get_auto_compact_token_limit(&self) -> Option<i64> {
@@ -117,8 +130,16 @@ impl ModelClient {
     /// the provider config.  Public callers always invoke `stream()` – the
     /// specialised helpers are private to avoid accidental misuse.
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
+        self.stream_with_task_kind(prompt, TaskKind::Regular).await
+    }
+
+    pub(crate) async fn stream_with_task_kind(
+        &self,
+        prompt: &Prompt,
+        task_kind: TaskKind,
+    ) -> Result<ResponseStream> {
         match self.provider.wire_api {
-            WireApi::Responses => self.stream_responses(prompt).await,
+            WireApi::Responses => self.stream_responses(prompt, task_kind).await,
             WireApi::Chat => {
                 // Create the raw streaming connection first.
                 let response_stream = stream_chat_completions(
@@ -126,6 +147,7 @@ impl ModelClient {
                     &self.config.model_family,
                     &self.client,
                     &self.provider,
+                    &self.otel_event_manager,
                 )
                 .await?;
 
@@ -158,11 +180,20 @@ impl ModelClient {
     }
 
     /// Implementation for the OpenAI *Responses* experimental API.
-    async fn stream_responses(&self, prompt: &Prompt) -> Result<ResponseStream> {
+    async fn stream_responses(
+        &self,
+        prompt: &Prompt,
+        task_kind: TaskKind,
+    ) -> Result<ResponseStream> {
         if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
-            return stream_from_fixture(path, self.provider.clone()).await;
+            return stream_from_fixture(
+                path,
+                self.provider.clone(),
+                self.otel_event_manager.clone(),
+            )
+            .await;
         }
 
         let auth_manager = self.auth_manager.clone();
@@ -183,18 +214,22 @@ impl ModelClient {
 
         let input_with_instructions = prompt.get_formatted_input();
 
-        // Only include `text.verbosity` for GPT-5 family models
-        let text = if self.config.model_family.family == "gpt-5" {
-            create_text_param_for_request(self.config.model_verbosity)
-        } else {
-            if self.config.model_verbosity.is_some() {
-                warn!(
-                    "model_verbosity is set but ignored for non-gpt-5 model family: {}",
-                    self.config.model_family.family
-                );
+        let verbosity = match &self.config.model_family.family {
+            family if family == "gpt-5" => self.config.model_verbosity,
+            _ => {
+                if self.config.model_verbosity.is_some() {
+                    warn!(
+                        "model_verbosity is set but ignored for non-gpt-5 model family: {}",
+                        self.config.model_family.family
+                    );
+                }
+
+                None
             }
-            None
         };
+
+        // Only include `text.verbosity` for GPT-5 family models
+        let text = create_text_param_for_request(verbosity, &prompt.output_schema);
 
         // In general, we want to explicitly send `store: false` when using the Responses API,
         // but in practice, the Azure Responses API rejects `store: false`:
@@ -211,7 +246,7 @@ impl ModelClient {
             input: &input_with_instructions,
             tools: &tools_json,
             tool_choice: "auto",
-            parallel_tool_calls: false,
+            parallel_tool_calls: prompt.parallel_tool_calls,
             reasoning,
             store: azure_workaround,
             stream: true,
@@ -224,158 +259,203 @@ impl ModelClient {
         if azure_workaround {
             attach_item_ids(&mut payload_json, &input_with_instructions);
         }
-        let payload_body = serde_json::to_string(&payload_json)?;
 
-        let mut attempt = 0;
-        let max_retries = self.provider.request_max_retries();
+        let max_attempts = self.provider.request_max_retries();
+        for attempt in 0..=max_attempts {
+            match self
+                .attempt_stream_responses(attempt, &payload_json, &auth_manager, task_kind)
+                .await
+            {
+                Ok(stream) => {
+                    return Ok(stream);
+                }
+                Err(StreamAttemptError::Fatal(e)) => {
+                    return Err(e);
+                }
+                Err(retryable_attempt_error) => {
+                    if attempt == max_attempts {
+                        return Err(retryable_attempt_error.into_error());
+                    }
 
-        loop {
-            attempt += 1;
+                    tokio::time::sleep(retryable_attempt_error.delay(attempt)).await;
+                }
+            }
+        }
 
-            // Always fetch the latest auth in case a prior attempt refreshed the token.
-            let auth = auth_manager.as_ref().and_then(|m| m.auth());
+        unreachable!("stream_responses_attempt should always return");
+    }
+
+    /// Single attempt to start a streaming Responses API call.
+    async fn attempt_stream_responses(
+        &self,
+        attempt: u64,
+        payload_json: &Value,
+        auth_manager: &Option<Arc<AuthManager>>,
+        task_kind: TaskKind,
+    ) -> std::result::Result<ResponseStream, StreamAttemptError> {
+        // Always fetch the latest auth in case a prior attempt refreshed the token.
+        let auth = auth_manager.as_ref().and_then(|m| m.auth());
+
+        trace!(
+            "POST to {}: {:?}",
+            self.provider.get_full_url(&auth),
+            serde_json::to_string(payload_json)
+        );
+
+        let mut req_builder = self
+            .provider
+            .create_request_builder(&self.client, &auth)
+            .await
+            .map_err(StreamAttemptError::Fatal)?;
+
+        req_builder = req_builder
+            .header("OpenAI-Beta", "responses=experimental")
+            // Send session_id for compatibility.
+            .header("conversation_id", self.conversation_id.to_string())
+            .header("session_id", self.conversation_id.to_string())
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .header("Codex-Task-Type", task_kind.header_value())
+            .json(payload_json);
+
+        if let Some(auth) = auth.as_ref()
+            && auth.mode == AuthMode::ChatGPT
+            && let Some(account_id) = auth.get_account_id()
+        {
+            req_builder = req_builder.header("chatgpt-account-id", account_id);
+        }
+
+        let res = self
+            .otel_event_manager
+            .log_request(attempt, || req_builder.send())
+            .await;
+
+        let mut request_id = None;
+        if let Ok(resp) = &res {
+            request_id = resp
+                .headers()
+                .get("cf-ray")
+                .map(|v| v.to_str().unwrap_or_default().to_string());
 
             trace!(
-                "POST to {}: {}",
-                self.provider.get_full_url(&auth),
-                payload_body.as_str()
+                "Response status: {}, cf-ray: {:?}",
+                resp.status(),
+                request_id
             );
+        }
 
-            let mut req_builder = self
-                .provider
-                .create_request_builder(&self.client, &auth)
-                .await?;
+        match res {
+            Ok(resp) if resp.status().is_success() => {
+                let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
-            req_builder = req_builder
-                .header("OpenAI-Beta", "responses=experimental")
-                // Send session_id for compatibility.
-                .header("conversation_id", self.conversation_id.to_string())
-                .header("session_id", self.conversation_id.to_string())
-                .header(reqwest::header::ACCEPT, "text/event-stream")
-                .json(&payload_json);
-
-            if let Some(auth) = auth.as_ref()
-                && auth.mode == AuthMode::ChatGPT
-                && let Some(account_id) = auth.get_account_id()
-            {
-                req_builder = req_builder.header("chatgpt-account-id", account_id);
-            }
-
-            let res = req_builder.send().await;
-            if let Ok(resp) = &res {
-                trace!(
-                    "Response status: {}, cf-ray: {}",
-                    resp.status(),
-                    resp.headers()
-                        .get("cf-ray")
-                        .map(|v| v.to_str().unwrap_or_default())
-                        .unwrap_or_default()
-                );
-            }
-
-            match res {
-                Ok(resp) if resp.status().is_success() => {
-                    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
-
-                    if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers())
-                        && tx_event
-                            .send(Ok(ResponseEvent::RateLimits(snapshot)))
-                            .await
-                            .is_err()
-                    {
-                        debug!("receiver dropped rate limit snapshot event");
-                    }
-
-                    // spawn task to process SSE
-                    let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
-                    tokio::spawn(process_sse(
-                        stream,
-                        tx_event,
-                        self.provider.stream_idle_timeout(),
-                    ));
-
-                    return Ok(ResponseStream { rx_event });
+                if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers())
+                    && tx_event
+                        .send(Ok(ResponseEvent::RateLimits(snapshot)))
+                        .await
+                        .is_err()
+                {
+                    debug!("receiver dropped rate limit snapshot event");
                 }
-                Ok(res) => {
-                    let status = res.status();
 
-                    // Pull out Retry‑After header if present.
-                    let retry_after_secs = res
-                        .headers()
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok());
+                // spawn task to process SSE
+                let stream = resp.bytes_stream().map_err(move |e| {
+                    CodexErr::ResponseStreamFailed(ResponseStreamFailed {
+                        source: e,
+                        request_id: request_id.clone(),
+                    })
+                });
+                tokio::spawn(process_sse(
+                    stream,
+                    tx_event,
+                    self.provider.stream_idle_timeout(),
+                    self.otel_event_manager.clone(),
+                ));
 
-                    if status == StatusCode::UNAUTHORIZED
-                        && let Some(manager) = auth_manager.as_ref()
-                        && manager.auth().is_some()
-                    {
-                        let _ = manager.refresh_token().await;
-                    }
+                Ok(ResponseStream { rx_event })
+            }
+            Ok(res) => {
+                let status = res.status();
 
-                    // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
-                    // errors. When we bubble early with only the HTTP status the caller sees an opaque
-                    // "unexpected status 400 Bad Request" which makes debugging nearly impossible.
-                    // Instead, read (and include) the response text so higher layers and users see the
-                    // exact error message (e.g. "Unknown parameter: 'input[0].metadata'"). The body is
-                    // small and this branch only runs on error paths so the extra allocation is
-                    // negligible.
-                    if !(status == StatusCode::TOO_MANY_REQUESTS
-                        || status == StatusCode::UNAUTHORIZED
-                        || status.is_server_error())
-                    {
-                        // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
-                        let body = res.text().await.unwrap_or_default();
-                        return Err(CodexErr::UnexpectedStatus(status, body));
-                    }
+                // Pull out Retry‑After header if present.
+                let retry_after_secs = res
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+                let retry_after = retry_after_secs.map(|s| Duration::from_millis(s * 1_000));
 
-                    if status == StatusCode::TOO_MANY_REQUESTS {
-                        let body = res.json::<ErrorResponse>().await.ok();
-                        if let Some(ErrorResponse { error }) = body {
-                            if error.r#type.as_deref() == Some("usage_limit_reached") {
-                                // Prefer the plan_type provided in the error message if present
-                                // because it's more up to date than the one encoded in the auth
-                                // token.
-                                let plan_type = error
-                                    .plan_type
-                                    .or_else(|| auth.as_ref().and_then(CodexAuth::get_plan_type));
-                                let resets_in_seconds = error.resets_in_seconds;
-                                return Err(CodexErr::UsageLimitReached(UsageLimitReachedError {
-                                    plan_type,
-                                    resets_in_seconds,
-                                }));
-                            } else if error.r#type.as_deref() == Some("usage_not_included") {
-                                return Err(CodexErr::UsageNotIncluded);
-                            }
+                if status == StatusCode::UNAUTHORIZED
+                    && let Some(manager) = auth_manager.as_ref()
+                    && manager.auth().is_some()
+                {
+                    let _ = manager.refresh_token().await;
+                }
+
+                // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
+                // errors. When we bubble early with only the HTTP status the caller sees an opaque
+                // "unexpected status 400 Bad Request" which makes debugging nearly impossible.
+                // Instead, read (and include) the response text so higher layers and users see the
+                // exact error message (e.g. "Unknown parameter: 'input[0].metadata'"). The body is
+                // small and this branch only runs on error paths so the extra allocation is
+                // negligible.
+                if !(status == StatusCode::TOO_MANY_REQUESTS
+                    || status == StatusCode::UNAUTHORIZED
+                    || status.is_server_error())
+                {
+                    // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
+                    let body = res.text().await.unwrap_or_default();
+                    return Err(StreamAttemptError::Fatal(CodexErr::UnexpectedStatus(
+                        UnexpectedResponseError {
+                            status,
+                            body,
+                            request_id: None,
+                        },
+                    )));
+                }
+
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    let rate_limit_snapshot = parse_rate_limit_snapshot(res.headers());
+                    let body = res.json::<ErrorResponse>().await.ok();
+                    if let Some(ErrorResponse { error }) = body {
+                        if error.r#type.as_deref() == Some("usage_limit_reached") {
+                            // Prefer the plan_type provided in the error message if present
+                            // because it's more up to date than the one encoded in the auth
+                            // token.
+                            let plan_type = error
+                                .plan_type
+                                .or_else(|| auth.as_ref().and_then(CodexAuth::get_plan_type));
+                            let resets_at = error
+                                .resets_at
+                                .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0));
+                            let codex_err = CodexErr::UsageLimitReached(UsageLimitReachedError {
+                                plan_type,
+                                resets_at,
+                                rate_limits: rate_limit_snapshot,
+                            });
+                            return Err(StreamAttemptError::Fatal(codex_err));
+                        } else if error.r#type.as_deref() == Some("usage_not_included") {
+                            return Err(StreamAttemptError::Fatal(CodexErr::UsageNotIncluded));
                         }
                     }
-
-                    if attempt > max_retries {
-                        if status == StatusCode::INTERNAL_SERVER_ERROR {
-                            return Err(CodexErr::InternalServerError);
-                        }
-
-                        return Err(CodexErr::RetryLimit(status));
-                    }
-
-                    let delay = retry_after_secs
-                        .map(|s| Duration::from_millis(s * 1_000))
-                        .unwrap_or_else(|| backoff(attempt));
-                    tokio::time::sleep(delay).await;
                 }
-                Err(e) => {
-                    if attempt > max_retries {
-                        return Err(e.into());
-                    }
-                    let delay = backoff(attempt);
-                    tokio::time::sleep(delay).await;
-                }
+
+                Err(StreamAttemptError::RetryableHttpError {
+                    status,
+                    retry_after,
+                    request_id,
+                })
             }
+            Err(e) => Err(StreamAttemptError::RetryableTransportError(
+                CodexErr::ConnectionFailed(ConnectionFailedError { source: e }),
+            )),
         }
     }
 
     pub fn get_provider(&self) -> ModelProviderInfo {
         self.provider.clone()
+    }
+
+    pub fn get_otel_event_manager(&self) -> OtelEventManager {
+        self.otel_event_manager.clone()
     }
 
     /// Returns the currently configured model slug.
@@ -403,6 +483,50 @@ impl ModelClient {
     }
 }
 
+enum StreamAttemptError {
+    RetryableHttpError {
+        status: StatusCode,
+        retry_after: Option<Duration>,
+        request_id: Option<String>,
+    },
+    RetryableTransportError(CodexErr),
+    Fatal(CodexErr),
+}
+
+impl StreamAttemptError {
+    /// attempt is 0-based.
+    fn delay(&self, attempt: u64) -> Duration {
+        // backoff() uses 1-based attempts.
+        let backoff_attempt = attempt + 1;
+        match self {
+            Self::RetryableHttpError { retry_after, .. } => {
+                retry_after.unwrap_or_else(|| backoff(backoff_attempt))
+            }
+            Self::RetryableTransportError { .. } => backoff(backoff_attempt),
+            Self::Fatal(_) => {
+                // Should not be called on Fatal errors.
+                Duration::from_secs(0)
+            }
+        }
+    }
+
+    fn into_error(self) -> CodexErr {
+        match self {
+            Self::RetryableHttpError {
+                status, request_id, ..
+            } => {
+                if status == StatusCode::INTERNAL_SERVER_ERROR {
+                    CodexErr::InternalServerError
+                } else {
+                    CodexErr::RetryLimit(RetryLimitReachedError { status, request_id })
+                }
+            }
+            Self::RetryableTransportError(error) => error,
+            Self::Fatal(error) => error,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct SseEvent {
     #[serde(rename = "type")]
@@ -413,9 +537,6 @@ struct SseEvent {
 }
 
 #[derive(Debug, Deserialize)]
-struct ResponseCreated {}
-
-#[derive(Debug, Deserialize)]
 struct ResponseCompleted {
     id: String,
     usage: Option<ResponseCompletedUsage>,
@@ -423,11 +544,11 @@ struct ResponseCompleted {
 
 #[derive(Debug, Deserialize)]
 struct ResponseCompletedUsage {
-    input_tokens: u64,
+    input_tokens: i64,
     input_tokens_details: Option<ResponseCompletedInputTokensDetails>,
-    output_tokens: u64,
+    output_tokens: i64,
     output_tokens_details: Option<ResponseCompletedOutputTokensDetails>,
-    total_tokens: u64,
+    total_tokens: i64,
 }
 
 impl From<ResponseCompletedUsage> for TokenUsage {
@@ -450,12 +571,12 @@ impl From<ResponseCompletedUsage> for TokenUsage {
 
 #[derive(Debug, Deserialize)]
 struct ResponseCompletedInputTokensDetails {
-    cached_tokens: u64,
+    cached_tokens: i64,
 }
 
 #[derive(Debug, Deserialize)]
 struct ResponseCompletedOutputTokensDetails {
-    reasoning_tokens: u64,
+    reasoning_tokens: i64,
 }
 
 fn attach_item_ids(payload_json: &mut Value, original_items: &[ResponseItem]) {
@@ -485,20 +606,45 @@ fn attach_item_ids(payload_json: &mut Value, original_items: &[ResponseItem]) {
     }
 }
 
-fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEvent> {
-    let primary_used_percent = parse_header_f64(headers, "x-codex-primary-used-percent")?;
-    let secondary_used_percent = parse_header_f64(headers, "x-codex-secondary-used-percent")?;
-    let primary_to_secondary_ratio_percent =
-        parse_header_f64(headers, "x-codex-primary-over-secondary-limit-percent")?;
-    let primary_window_minutes = parse_header_u64(headers, "x-codex-primary-window-minutes")?;
-    let secondary_window_minutes = parse_header_u64(headers, "x-codex-secondary-window-minutes")?;
+fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshot> {
+    let primary = parse_rate_limit_window(
+        headers,
+        "x-codex-primary-used-percent",
+        "x-codex-primary-window-minutes",
+        "x-codex-primary-reset-at",
+    );
 
-    Some(RateLimitSnapshotEvent {
-        primary_used_percent,
-        secondary_used_percent,
-        primary_to_secondary_ratio_percent,
-        primary_window_minutes,
-        secondary_window_minutes,
+    let secondary = parse_rate_limit_window(
+        headers,
+        "x-codex-secondary-used-percent",
+        "x-codex-secondary-window-minutes",
+        "x-codex-secondary-reset-at",
+    );
+
+    Some(RateLimitSnapshot { primary, secondary })
+}
+
+fn parse_rate_limit_window(
+    headers: &HeaderMap,
+    used_percent_header: &str,
+    window_minutes_header: &str,
+    resets_at_header: &str,
+) -> Option<RateLimitWindow> {
+    let used_percent: Option<f64> = parse_header_f64(headers, used_percent_header);
+
+    used_percent.and_then(|used_percent| {
+        let window_minutes = parse_header_i64(headers, window_minutes_header);
+        let resets_at = parse_header_i64(headers, resets_at_header);
+
+        let has_data = used_percent != 0.0
+            || window_minutes.is_some_and(|minutes| minutes != 0)
+            || resets_at.is_some();
+
+        has_data.then_some(RateLimitWindow {
+            used_percent,
+            window_minutes,
+            resets_at,
+        })
     })
 }
 
@@ -509,8 +655,8 @@ fn parse_header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
         .filter(|v| v.is_finite())
 }
 
-fn parse_header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
-    parse_header_str(headers, name)?.parse::<u64>().ok()
+fn parse_header_i64(headers: &HeaderMap, name: &str) -> Option<i64> {
+    parse_header_str(headers, name)?.parse::<i64>().ok()
 }
 
 fn parse_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -521,6 +667,7 @@ async fn process_sse<S>(
     stream: S,
     tx_event: mpsc::Sender<Result<ResponseEvent>>,
     idle_timeout: Duration,
+    otel_event_manager: OtelEventManager,
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
@@ -532,7 +679,12 @@ async fn process_sse<S>(
     let mut response_error: Option<CodexErr> = None;
 
     loop {
-        let sse = match timeout(idle_timeout, stream.next()).await {
+        let start = std::time::Instant::now();
+        let response = timeout(idle_timeout, stream.next()).await;
+        let duration = start.elapsed();
+        otel_event_manager.log_sse_event(&response, duration);
+
+        let sse = match response {
             Ok(Some(Ok(sse))) => sse,
             Ok(Some(Err(e))) => {
                 debug!("SSE Error: {e:#}");
@@ -546,6 +698,21 @@ async fn process_sse<S>(
                         id: response_id,
                         usage,
                     }) => {
+                        if let Some(token_usage) = &usage {
+                            otel_event_manager.sse_event_completed(
+                                token_usage.input_tokens,
+                                token_usage.output_tokens,
+                                token_usage
+                                    .input_tokens_details
+                                    .as_ref()
+                                    .map(|d| d.cached_tokens),
+                                token_usage
+                                    .output_tokens_details
+                                    .as_ref()
+                                    .map(|d| d.reasoning_tokens),
+                                token_usage.total_tokens,
+                            );
+                        }
                         let event = ResponseEvent::Completed {
                             response_id,
                             token_usage: usage.map(Into::into),
@@ -553,12 +720,13 @@ async fn process_sse<S>(
                         let _ = tx_event.send(Ok(event)).await;
                     }
                     None => {
-                        let _ = tx_event
-                            .send(Err(response_error.unwrap_or(CodexErr::Stream(
-                                "stream closed before response.completed".into(),
-                                None,
-                            ))))
-                            .await;
+                        let error = response_error.unwrap_or(CodexErr::Stream(
+                            "stream closed before response.completed".into(),
+                            None,
+                        ));
+                        otel_event_manager.see_event_completed_failed(&error);
+
+                        let _ = tx_event.send(Err(error)).await;
                     }
                 }
                 return;
@@ -657,12 +825,18 @@ async fn process_sse<S>(
                     if let Some(error) = error {
                         match serde_json::from_value::<Error>(error.clone()) {
                             Ok(error) => {
-                                let delay = try_parse_retry_after(&error);
-                                let message = error.message.unwrap_or_default();
-                                response_error = Some(CodexErr::Stream(message, delay));
+                                if is_context_window_error(&error) {
+                                    response_error = Some(CodexErr::ContextWindowExceeded);
+                                } else {
+                                    let delay = try_parse_retry_after(&error);
+                                    let message = error.message.clone().unwrap_or_default();
+                                    response_error = Some(CodexErr::Stream(message, delay));
+                                }
                             }
                             Err(e) => {
-                                debug!("failed to parse ErrorResponse: {e}");
+                                let error = format!("failed to parse ErrorResponse: {e}");
+                                debug!(error);
+                                response_error = Some(CodexErr::Stream(error, None))
                             }
                         }
                     }
@@ -676,7 +850,9 @@ async fn process_sse<S>(
                             response_completed = Some(r);
                         }
                         Err(e) => {
-                            debug!("failed to parse ResponseCompleted: {e}");
+                            let error = format!("failed to parse ResponseCompleted: {e}");
+                            debug!(error);
+                            response_error = Some(CodexErr::Stream(error, None));
                             continue;
                         }
                     };
@@ -723,6 +899,7 @@ async fn process_sse<S>(
 async fn stream_from_fixture(
     path: impl AsRef<Path>,
     provider: ModelProviderInfo,
+    otel_event_manager: OtelEventManager,
 ) -> Result<ResponseStream> {
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
     let f = std::fs::File::open(path.as_ref())?;
@@ -741,6 +918,7 @@ async fn stream_from_fixture(
         stream,
         tx_event,
         provider.stream_idle_timeout(),
+        otel_event_manager,
     ));
     Ok(ResponseStream { rx_event })
 }
@@ -779,9 +957,14 @@ fn try_parse_retry_after(err: &Error) -> Option<Duration> {
     None
 }
 
+fn is_context_window_error(error: &Error) -> bool {
+    error.code.as_deref() == Some("context_length_exceeded")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use serde_json::json;
     use tokio::sync::mpsc;
     use tokio_test::io::Builder as IoBuilder;
@@ -796,6 +979,7 @@ mod tests {
     async fn collect_events(
         chunks: &[&[u8]],
         provider: ModelProviderInfo,
+        otel_event_manager: OtelEventManager,
     ) -> Vec<Result<ResponseEvent>> {
         let mut builder = IoBuilder::new();
         for chunk in chunks {
@@ -805,7 +989,12 @@ mod tests {
         let reader = builder.build();
         let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout()));
+        tokio::spawn(process_sse(
+            stream,
+            tx,
+            provider.stream_idle_timeout(),
+            otel_event_manager,
+        ));
 
         let mut events = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -819,6 +1008,7 @@ mod tests {
     async fn run_sse(
         events: Vec<serde_json::Value>,
         provider: ModelProviderInfo,
+        otel_event_manager: OtelEventManager,
     ) -> Vec<ResponseEvent> {
         let mut body = String::new();
         for e in events {
@@ -835,13 +1025,31 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
         let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout()));
+        tokio::spawn(process_sse(
+            stream,
+            tx,
+            provider.stream_idle_timeout(),
+            otel_event_manager,
+        ));
 
         let mut out = Vec::new();
         while let Some(ev) = rx.recv().await {
             out.push(ev.expect("channel closed"));
         }
         out
+    }
+
+    fn otel_event_manager() -> OtelEventManager {
+        OtelEventManager::new(
+            ConversationId::new(),
+            "test",
+            "test",
+            None,
+            Some("test@test.com".to_string()),
+            Some(AuthMode::ChatGPT),
+            false,
+            "test".to_string(),
+        )
     }
 
     // ────────────────────────────
@@ -895,9 +1103,12 @@ mod tests {
             requires_openai_auth: false,
         };
 
+        let otel_event_manager = otel_event_manager();
+
         let events = collect_events(
             &[sse1.as_bytes(), sse2.as_bytes(), sse3.as_bytes()],
             provider,
+            otel_event_manager,
         )
         .await;
 
@@ -955,7 +1166,9 @@ mod tests {
             requires_openai_auth: false,
         };
 
-        let events = collect_events(&[sse1.as_bytes()], provider).await;
+        let otel_event_manager = otel_event_manager();
+
+        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
 
         assert_eq!(events.len(), 2);
 
@@ -989,7 +1202,9 @@ mod tests {
             requires_openai_auth: false,
         };
 
-        let events = collect_events(&[sse1.as_bytes()], provider).await;
+        let otel_event_manager = otel_event_manager();
+
+        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
 
         assert_eq!(events.len(), 1);
 
@@ -1002,6 +1217,74 @@ mod tests {
                 assert_eq!(*delay, Some(Duration::from_secs_f64(11.054)));
             }
             other => panic!("unexpected second event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn context_window_error_is_fatal() {
+        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_5c66275b97b9baef1ed95550adb3b7ec13b17aafd1d2f11b","object":"response","created_at":1759510079,"status":"failed","background":false,"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."},"usage":null,"user":null,"metadata":{}}}"#;
+
+        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
+        let provider = ModelProviderInfo {
+            name: "test".to_string(),
+            base_url: Some("https://test.com".to_string()),
+            env_key: Some("TEST_API_KEY".to_string()),
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: Some(0),
+            stream_idle_timeout_ms: Some(1000),
+            requires_openai_auth: false,
+        };
+
+        let otel_event_manager = otel_event_manager();
+
+        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
+
+        assert_eq!(events.len(), 1);
+
+        match &events[0] {
+            Err(err @ CodexErr::ContextWindowExceeded) => {
+                assert_eq!(err.to_string(), CodexErr::ContextWindowExceeded.to_string());
+            }
+            other => panic!("unexpected context window event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn context_window_error_with_newline_is_fatal() {
+        let raw_error = r#"{"type":"response.failed","sequence_number":4,"response":{"id":"resp_fatal_newline","object":"response","created_at":1759510080,"status":"failed","background":false,"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try\nagain."},"usage":null,"user":null,"metadata":{}}}"#;
+
+        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
+        let provider = ModelProviderInfo {
+            name: "test".to_string(),
+            base_url: Some("https://test.com".to_string()),
+            env_key: Some("TEST_API_KEY".to_string()),
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: Some(0),
+            stream_idle_timeout_ms: Some(1000),
+            requires_openai_auth: false,
+        };
+
+        let otel_event_manager = otel_event_manager();
+
+        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
+
+        assert_eq!(events.len(), 1);
+
+        match &events[0] {
+            Err(err @ CodexErr::ContextWindowExceeded) => {
+                assert_eq!(err.to_string(), CodexErr::ContextWindowExceeded.to_string());
+            }
+            other => panic!("unexpected context window event: {other:?}"),
         }
     }
 
@@ -1094,7 +1377,9 @@ mod tests {
                 requires_openai_auth: false,
             };
 
-            let out = run_sse(evs, provider).await;
+            let otel_event_manager = otel_event_manager();
+
+            let out = run_sse(evs, provider, otel_event_manager).await;
             assert_eq!(out.len(), case.expected_len, "case {}", case.name);
             assert!(
                 (case.expect_first)(&out[0]),
@@ -1111,7 +1396,7 @@ mod tests {
             message: Some("Rate limit reached for gpt-5 in organization org- on tokens per min (TPM): Limit 1, Used 1, Requested 19304. Please try again in 28ms. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
             code: Some("rate_limit_exceeded".to_string()),
             plan_type: None,
-            resets_in_seconds: None
+            resets_at: None
         };
 
         let delay = try_parse_retry_after(&err);
@@ -1125,40 +1410,36 @@ mod tests {
             message: Some("Rate limit reached for gpt-5 in organization <ORG> on tokens per min (TPM): Limit 30000, Used 6899, Requested 24050. Please try again in 1.898s. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
             code: Some("rate_limit_exceeded".to_string()),
             plan_type: None,
-            resets_in_seconds: None
+            resets_at: None
         };
         let delay = try_parse_retry_after(&err);
         assert_eq!(delay, Some(Duration::from_secs_f64(1.898)));
     }
 
     #[test]
-    fn error_response_deserializes_old_schema_known_plan_type_and_serializes_back() {
+    fn error_response_deserializes_schema_known_plan_type_and_serializes_back() {
         use crate::token_data::KnownPlan;
         use crate::token_data::PlanType;
 
-        let json = r#"{"error":{"type":"usage_limit_reached","plan_type":"pro","resets_in_seconds":3600}}"#;
-        let resp: ErrorResponse =
-            serde_json::from_str(json).expect("should deserialize old schema");
+        let json =
+            r#"{"error":{"type":"usage_limit_reached","plan_type":"pro","resets_at":1704067200}}"#;
+        let resp: ErrorResponse = serde_json::from_str(json).expect("should deserialize schema");
 
-        assert!(matches!(
-            resp.error.plan_type,
-            Some(PlanType::Known(KnownPlan::Pro))
-        ));
+        assert_matches!(resp.error.plan_type, Some(PlanType::Known(KnownPlan::Pro)));
 
         let plan_json = serde_json::to_string(&resp.error.plan_type).expect("serialize plan_type");
         assert_eq!(plan_json, "\"pro\"");
     }
 
     #[test]
-    fn error_response_deserializes_old_schema_unknown_plan_type_and_serializes_back() {
+    fn error_response_deserializes_schema_unknown_plan_type_and_serializes_back() {
         use crate::token_data::PlanType;
 
         let json =
-            r#"{"error":{"type":"usage_limit_reached","plan_type":"vip","resets_in_seconds":60}}"#;
-        let resp: ErrorResponse =
-            serde_json::from_str(json).expect("should deserialize old schema");
+            r#"{"error":{"type":"usage_limit_reached","plan_type":"vip","resets_at":1704067260}}"#;
+        let resp: ErrorResponse = serde_json::from_str(json).expect("should deserialize schema");
 
-        assert!(matches!(resp.error.plan_type, Some(PlanType::Unknown(ref s)) if s == "vip"));
+        assert_matches!(resp.error.plan_type, Some(PlanType::Unknown(ref s)) if s == "vip");
 
         let plan_json = serde_json::to_string(&resp.error.plan_type).expect("serialize plan_type");
         assert_eq!(plan_json, "\"vip\"");

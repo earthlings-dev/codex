@@ -9,11 +9,12 @@ use codex_core::content_items_to_text;
 use codex_core::is_session_prefix_message;
 use codex_core::protocol::ConversationPathResponseEvent;
 use codex_core::protocol::EventMsg;
-use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::RolloutItem;
 use codex_core::protocol::RolloutLine;
+use codex_protocol::user_input::UserInput;
 use core_test_support::load_default_config_for_test;
+use core_test_support::skip_if_no_network;
 use core_test_support::wait_for_event;
 use tempfile::TempDir;
 use wiremock::Mock;
@@ -29,6 +30,8 @@ fn sse_completed(id: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_conversation_twice_drops_to_first_message() {
+    skip_if_no_network!();
+
     // Start a mock server that completes three turns.
     let server = MockServer::start().await;
     let sse = sse_completed("resp");
@@ -68,7 +71,7 @@ async fn fork_conversation_twice_drops_to_first_message() {
     for text in ["first", "second", "third"] {
         codex
             .submit(Op::UserInput {
-                items: vec![InputItem::Text {
+                items: vec![UserInput::Text {
                     text: text.to_string(),
                 }],
             })

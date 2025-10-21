@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     // Spawn the subprocess and connect the client.
     let program = args.remove(0);
     let env = None;
-    let client = McpClient::new_stdio_client(program, args, env)
+    let client = McpClient::new_stdio_client(program, args, env, &[], None)
         .await
         .with_context(|| format!("failed to spawn subprocess: {original_args:?}"))?;
 
@@ -70,11 +70,8 @@ async fn main() -> Result<()> {
         },
         protocol_version: MCP_SCHEMA_VERSION.to_owned(),
     };
-    let initialize_notification_params = None;
     let timeout = Some(Duration::from_secs(10));
-    let response = client
-        .initialize(params, initialize_notification_params, timeout)
-        .await?;
+    let response = client.initialize(params, timeout).await?;
     eprintln!("initialize response: {response:?}");
 
     // Issue `tools/list` request (no params).
