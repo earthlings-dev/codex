@@ -210,6 +210,7 @@ impl CodexClient {
             request_id: request_id.clone(),
             params: AddConversationListenerParams {
                 conversation_id: *conversation_id,
+                experimental_raw_events: false,
             },
         };
 
@@ -330,6 +331,9 @@ impl CodexClient {
                     }
                     ServerNotification::AuthStatusChange(status) => {
                         println!("< authStatusChange notification: {status:?}");
+                    }
+                    ServerNotification::AccountRateLimitsUpdated(snapshot) => {
+                        println!("< accountRateLimitsUpdated notification: {snapshot:?}");
                     }
                     ServerNotification::SessionConfigured(_) => {
                         // SessionConfigured notifications are unrelated to login; skip.
