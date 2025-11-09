@@ -34,6 +34,11 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SendUserMessageParams;
 use codex_app_server_protocol::SendUserMessageResponse;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::ConversationId;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -61,6 +66,12 @@ enum CliCommand {
         #[arg()]
         user_message: String,
     },
+    /// Send a user message through the app-server V2 thread/turn APIs.
+    SendMessageV2 {
+        /// User message to send to Codex.
+        #[arg()]
+        user_message: String,
+    },
     /// Trigger the ChatGPT login flow and wait for completion.
     TestLogin,
     /// Fetch the current account rate limits from the Codex app-server.
@@ -72,6 +83,7 @@ fn main() -> Result<()> {
 
     match command {
         CliCommand::SendMessage { user_message } => send_message(codex_bin, user_message),
+        CliCommand::SendMessageV2 { user_message } => send_message_v2(codex_bin, user_message),
         CliCommand::TestLogin => test_login(codex_bin),
         CliCommand::GetAccountRateLimits => get_account_rate_limits(codex_bin),
     }
@@ -95,6 +107,27 @@ fn send_message(codex_bin: String, user_message: String) -> Result<()> {
     client.stream_conversation(&conversation.conversation_id)?;
 
     client.remove_conversation_listener(subscription.subscription_id)?;
+
+    Ok(())
+}
+
+fn send_message_v2(codex_bin: String, user_message: String) -> Result<()> {
+    let mut client = CodexClient::spawn(codex_bin)?;
+
+    let initialize = client.initialize()?;
+    println!("< initialize response: {initialize:?}");
+
+    let thread_response = client.thread_start(ThreadStartParams::default())?;
+    println!("< thread/start response: {thread_response:?}");
+
+    let turn_response = client.turn_start(TurnStartParams {
+        thread_id: thread_response.thread.id.clone(),
+        input: vec![V2UserInput::Text { text: user_message }],
+        ..Default::default()
+    })?;
+    println!("< turn/start response: {turn_response:?}");
+
+    client.stream_turn(&thread_response.thread.id, &turn_response.turn.id)?;
 
     Ok(())
 }
@@ -252,6 +285,26 @@ impl CodexClient {
         self.send_request(request, request_id, "sendUserMessage")
     }
 
+    fn thread_start(&mut self, params: ThreadStartParams) -> Result<ThreadStartResponse> {
+        let request_id = self.request_id();
+        let request = ClientRequest::ThreadStart {
+            request_id: request_id.clone(),
+            params,
+        };
+
+        self.send_request(request, request_id, "thread/start")
+    }
+
+    fn turn_start(&mut self, params: TurnStartParams) -> Result<TurnStartResponse> {
+        let request_id = self.request_id();
+        let request = ClientRequest::TurnStart {
+            request_id: request_id.clone(),
+            params,
+        };
+
+        self.send_request(request, request_id, "turn/start")
+    }
+
     fn login_chat_gpt(&mut self) -> Result<LoginChatGptResponse> {
         let request_id = self.request_id();
         let request = ClientRequest::LoginChatGpt {
@@ -338,11 +391,67 @@ impl CodexClient {
                     ServerNotification::SessionConfigured(_) => {
                         // SessionConfigured notifications are unrelated to login; skip.
                     }
+                    _ => {}
                 }
             }
 
             // Not a server notification (likely a conversation event); keep waiting.
         }
+    }
+
+    fn stream_turn(&mut self, thread_id: &str, turn_id: &str) -> Result<()> {
+        loop {
+            let notification = self.next_notification()?;
+
+            let Ok(server_notification) = ServerNotification::try_from(notification) else {
+                continue;
+            };
+
+            match server_notification {
+                ServerNotification::ThreadStarted(payload) => {
+                    if payload.thread.id == thread_id {
+                        println!("< thread/started notification: {:?}", payload.thread);
+                    }
+                }
+                ServerNotification::TurnStarted(payload) => {
+                    if payload.turn.id == turn_id {
+                        println!("< turn/started notification: {:?}", payload.turn.status);
+                    }
+                }
+                ServerNotification::AgentMessageDelta(delta) => {
+                    print!("{}", delta.delta);
+                    std::io::stdout().flush().ok();
+                }
+                ServerNotification::CommandExecutionOutputDelta(delta) => {
+                    print!("{}", delta.delta);
+                    std::io::stdout().flush().ok();
+                }
+                ServerNotification::ItemStarted(payload) => {
+                    println!("\n< item started: {:?}", payload.item);
+                }
+                ServerNotification::ItemCompleted(payload) => {
+                    println!("< item completed: {:?}", payload.item);
+                }
+                ServerNotification::TurnCompleted(payload) => {
+                    if payload.turn.id == turn_id {
+                        println!("\n< turn/completed notification: {:?}", payload.turn.status);
+                        if let Some(error) = payload.turn.error {
+                            println!("[turn error] {}", error.message);
+                        }
+                        println!("< usage: {:?}", payload.usage);
+                        break;
+                    }
+                }
+                ServerNotification::McpToolCallProgress(payload) => {
+                    println!("< MCP tool progress: {}", payload.message);
+                }
+                _ => {
+                    println!("[UNKNOWN SERVER NOTIFICATION] {server_notification:?}");
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn extract_event(
