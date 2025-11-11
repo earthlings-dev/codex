@@ -17,6 +17,7 @@ use clap::Parser;
 use clap::Subcommand;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::AddConversationSubscriptionResponse;
+use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
@@ -31,6 +32,7 @@ use codex_app_server_protocol::LoginChatGptResponse;
 use codex_app_server_protocol::NewConversationParams;
 use codex_app_server_protocol::NewConversationResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::SendUserMessageParams;
 use codex_app_server_protocol::SendUserMessageResponse;
 use codex_app_server_protocol::ServerNotification;
@@ -72,6 +74,23 @@ enum CliCommand {
         #[arg()]
         user_message: String,
     },
+    /// Start a V2 turn that elicits an ExecCommand approval.
+    #[command(name = "trigger-cmd-approval")]
+    TriggerCmdApproval {
+        /// Optional prompt; defaults to a simple python command.
+        #[arg()]
+        user_message: Option<String>,
+    },
+    /// Start a V2 turn that elicits an ApplyPatch approval.
+    #[command(name = "trigger-patch-approval")]
+    TriggerPatchApproval {
+        /// Optional prompt; defaults to creating a file via apply_patch.
+        #[arg()]
+        user_message: Option<String>,
+    },
+    /// Start a V2 turn that should not elicit an ExecCommand approval.
+    #[command(name = "no-trigger-cmd-approval")]
+    NoTriggerCmdApproval,
     /// Trigger the ChatGPT login flow and wait for completion.
     TestLogin,
     /// Fetch the current account rate limits from the Codex app-server.
@@ -84,6 +103,13 @@ fn main() -> Result<()> {
     match command {
         CliCommand::SendMessage { user_message } => send_message(codex_bin, user_message),
         CliCommand::SendMessageV2 { user_message } => send_message_v2(codex_bin, user_message),
+        CliCommand::TriggerCmdApproval { user_message } => {
+            trigger_cmd_approval(codex_bin, user_message)
+        }
+        CliCommand::TriggerPatchApproval { user_message } => {
+            trigger_patch_approval(codex_bin, user_message)
+        }
+        CliCommand::NoTriggerCmdApproval => no_trigger_cmd_approval(codex_bin),
         CliCommand::TestLogin => test_login(codex_bin),
         CliCommand::GetAccountRateLimits => get_account_rate_limits(codex_bin),
     }
@@ -112,6 +138,44 @@ fn send_message(codex_bin: String, user_message: String) -> Result<()> {
 }
 
 fn send_message_v2(codex_bin: String, user_message: String) -> Result<()> {
+    send_message_v2_with_policies(codex_bin, user_message, None, None)
+}
+
+fn trigger_cmd_approval(codex_bin: String, user_message: Option<String>) -> Result<()> {
+    let default_prompt =
+        "Run `touch /tmp/should-trigger-approval` so I can confirm the file exists.";
+    let message = user_message.unwrap_or_else(|| default_prompt.to_string());
+    send_message_v2_with_policies(
+        codex_bin,
+        message,
+        Some(AskForApproval::OnRequest),
+        Some(SandboxPolicy::ReadOnly),
+    )
+}
+
+fn trigger_patch_approval(codex_bin: String, user_message: Option<String>) -> Result<()> {
+    let default_prompt =
+        "Create a file named APPROVAL_DEMO.txt containing a short hello message using apply_patch.";
+    let message = user_message.unwrap_or_else(|| default_prompt.to_string());
+    send_message_v2_with_policies(
+        codex_bin,
+        message,
+        Some(AskForApproval::OnRequest),
+        Some(SandboxPolicy::ReadOnly),
+    )
+}
+
+fn no_trigger_cmd_approval(codex_bin: String) -> Result<()> {
+    let prompt = "Run `touch should_not_trigger_approval.txt`";
+    send_message_v2_with_policies(codex_bin, prompt.to_string(), None, None)
+}
+
+fn send_message_v2_with_policies(
+    codex_bin: String,
+    user_message: String,
+    approval_policy: Option<AskForApproval>,
+    sandbox_policy: Option<SandboxPolicy>,
+) -> Result<()> {
     let mut client = CodexClient::spawn(codex_bin)?;
 
     let initialize = client.initialize()?;
@@ -119,12 +183,15 @@ fn send_message_v2(codex_bin: String, user_message: String) -> Result<()> {
 
     let thread_response = client.thread_start(ThreadStartParams::default())?;
     println!("< thread/start response: {thread_response:?}");
-
-    let turn_response = client.turn_start(TurnStartParams {
+    let mut turn_params = TurnStartParams {
         thread_id: thread_response.thread.id.clone(),
         input: vec![V2UserInput::Text { text: user_message }],
         ..Default::default()
-    })?;
+    };
+    turn_params.approval_policy = approval_policy;
+    turn_params.sandbox_policy = sandbox_policy;
+
+    let turn_response = client.turn_start(turn_params)?;
     println!("< turn/start response: {turn_response:?}");
 
     client.stream_turn(&thread_response.thread.id, &turn_response.turn.id)?;
@@ -530,7 +597,7 @@ impl CodexClient {
                 }
                 JSONRPCMessage::Error(err) => {
                     if err.id == request_id {
-                        bail!("{method} failed: {:?}", err);
+                        bail!("{method} failed: {err:?}");
                     }
                 }
                 JSONRPCMessage::Notification(notification) => {
