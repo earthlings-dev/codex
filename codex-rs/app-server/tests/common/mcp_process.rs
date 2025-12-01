@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
@@ -10,8 +11,6 @@ use tokio::process::Child;
 use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 
-use anyhow::Context;
-use assert_cmd::prelude::*;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::ArchiveConversationParams;
 use codex_app_server_protocol::CancelLoginAccountParams;
@@ -46,8 +45,9 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnStartParams;
-use std::process::Command as StdCommand;
 use tokio::process::Command;
+use anyhow::anyhow;
+use anyhow::Context;
 
 pub struct McpProcess {
     next_request_id: AtomicI64,
@@ -75,11 +75,25 @@ impl McpProcess {
         codex_home: &Path,
         env_overrides: &[(&str, Option<&str>)],
     ) -> anyhow::Result<Self> {
-        // Use assert_cmd to locate the binary path and then switch to tokio::process::Command
-        let std_cmd = StdCommand::cargo_bin("codex-app-server")
-            .context("should find binary for codex-mcp-server")?;
-
-        let program = std_cmd.get_program().to_owned();
+        // Use cargo-set env vars to locate the binary path and then switch to tokio::process::Command
+        let program = std::env::var("CARGO_BIN_EXE_codex-app-server")
+            .or_else(|_| std::env::var("CARGO_BIN_EXE_codex_app_server"))
+            .map(PathBuf::from)
+            .or_else(|_| {
+                let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .ancestors()
+                    .nth(3)
+                    .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")));
+                let candidate = workspace_dir.join("target/debug").join(format!(
+                    "codex-app-server{}",
+                    std::env::consts::EXE_SUFFIX
+                ));
+                candidate
+                    .exists()
+                    .then_some(candidate)
+                    .ok_or_else(|| anyhow!("codex-app-server binary not found in target/debug"))
+            })
+            .context("should find binary for codex-app-server")?;
 
         let mut cmd = Command::new(program);
 

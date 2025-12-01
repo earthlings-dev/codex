@@ -10,6 +10,7 @@ use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
+use ratatui::widgets::Widget;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
@@ -1603,7 +1604,7 @@ impl Renderable for ChatComposer {
                             custom_rect.x += 2;
                             custom_rect.width = custom_rect.width.saturating_sub(2);
                         }
-                        Line::from(spans).render_ref(custom_rect, buf);
+                        Line::from(spans).render(custom_rect, buf);
                     }
                 } else {
                     render_footer(hint_rect, buf, footer_props);
@@ -1611,7 +1612,7 @@ impl Renderable for ChatComposer {
             }
         }
         let style = user_message_style();
-        Block::default().style(style).render_ref(composer_rect, buf);
+        Block::default().style(style).render(composer_rect, buf);
         if !textarea_rect.is_empty() {
             buf.set_span(
                 textarea_rect.x - LIVE_PREFIX_COLS,
@@ -1625,7 +1626,7 @@ impl Renderable for ChatComposer {
         StatefulWidgetRef::render_ref(&(&self.textarea), textarea_rect, buf, &mut state);
         if self.textarea.text().is_empty() {
             let placeholder = Span::from(self.placeholder_text.as_str()).dim();
-            Line::from(vec![placeholder]).render_ref(textarea_rect.inner(Margin::new(0, 0)), buf);
+            Line::from(vec![placeholder]).render(textarea_rect.inner(Margin::new(0, 0)), buf);
         }
     }
 }

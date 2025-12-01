@@ -10,7 +10,6 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -170,7 +169,7 @@ impl Renderable for StatusIndicatorWidget {
             spans.push(format!("({pretty_elapsed})").dim());
         }
 
-        Line::from(spans).render_ref(area, buf);
+        Line::from(spans).render(area, buf);
     }
 }
 

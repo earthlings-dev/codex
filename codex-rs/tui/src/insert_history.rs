@@ -22,6 +22,31 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
+fn to_crossterm_color(color: Color) -> CColor {
+    match color {
+        Color::Reset => CColor::Reset,
+        Color::Black => CColor::Black,
+        Color::Red => CColor::Red,
+        Color::Green => CColor::Green,
+        Color::Yellow => CColor::Yellow,
+        Color::Blue => CColor::Blue,
+        Color::Magenta => CColor::Magenta,
+        Color::Cyan => CColor::Cyan,
+        Color::Gray => CColor::Grey,
+        Color::DarkGray => CColor::DarkGrey,
+        Color::LightRed => CColor::DarkRed,
+        Color::LightGreen => CColor::DarkGreen,
+        Color::LightYellow => CColor::DarkYellow,
+        Color::LightBlue => CColor::DarkBlue,
+        Color::LightMagenta => CColor::DarkMagenta,
+        Color::LightCyan => CColor::DarkCyan,
+        Color::White => CColor::White,
+        Color::Indexed(i) => CColor::AnsiValue(i),
+        Color::Rgb(r, g, b) => CColor::Rgb { r, g, b },
+    }
+}
+
+
 /// Insert `lines` above the viewport using the terminal's backend writer
 /// (avoids direct stdout references).
 pub fn insert_history_lines<B>(
@@ -29,7 +54,7 @@ pub fn insert_history_lines<B>(
     lines: Vec<Line>,
 ) -> io::Result<()>
 where
-    B: Backend + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
 
@@ -99,11 +124,11 @@ where
             SetColors(Colors::new(
                 line.style
                     .fg
-                    .map(std::convert::Into::into)
+                    .map(to_crossterm_color)
                     .unwrap_or(CColor::Reset),
                 line.style
                     .bg
-                    .map(std::convert::Into::into)
+                    .map(to_crossterm_color)
                     .unwrap_or(CColor::Reset)
             ))
         )?;
@@ -265,7 +290,10 @@ where
         if next_fg != fg || next_bg != bg {
             queue!(
                 writer,
-                SetColors(Colors::new(next_fg.into(), next_bg.into()))
+                SetColors(Colors::new(
+                    to_crossterm_color(next_fg),
+                    to_crossterm_color(next_bg)
+                ))
             )?;
             fg = next_fg;
             bg = next_bg;

@@ -1,5 +1,4 @@
 use ratatui::style::Style;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use std::sync::OnceLock;

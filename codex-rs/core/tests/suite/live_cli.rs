@@ -30,7 +30,9 @@ fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
     // implementation). Instead we configure the std `Command` ourselves, then later hand the
     // resulting `Output` to `assert_cmd` for the familiar assertions.
 
-    let mut cmd = Command::cargo_bin("codex-rs").unwrap();
+    let bin = std::env::var("CARGO_BIN_EXE_codex-rs")
+        .expect("CARGO_BIN_EXE_codex-rs should be set when running tests");
+    let mut cmd = Command::new(bin);
     cmd.current_dir(dir.path());
     cmd.env("OPENAI_API_KEY", require_api_key());
 

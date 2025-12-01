@@ -90,7 +90,7 @@ seccompiler = { workspace = true }
 keyring = { workspace = true, features = ["linux-native-async-persistent"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.9"
+core-foundation = "0.10.1"
 keyring = { workspace = true, features = ["apple-native"] }
 
 # Build OpenSSL from source for musl builds.
