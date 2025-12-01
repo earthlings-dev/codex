@@ -111,7 +111,7 @@ mod tests {
         let widget = WelcomeWidget::new(false, FrameRequester::test_dummy(), true);
         let area = Rect::new(0, 0, MIN_ANIMATION_WIDTH, MIN_ANIMATION_HEIGHT);
         let mut buf = Buffer::empty(area);
-        (&widget).render(area, &mut buf);
+        (&widget).render_ref(area, &mut buf);
 
         let mut found = false;
         let mut last_non_empty: Option<u16> = None;

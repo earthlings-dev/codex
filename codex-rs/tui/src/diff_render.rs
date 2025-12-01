@@ -424,7 +424,6 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::text::Text;
     use ratatui::widgets::Paragraph;
-    use ratatui::widgets::WidgetRef;
     use ratatui::widgets::Wrap;
     fn diff_summary_for_tests(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
         create_diff_summary(changes, &PathBuf::from("/"), 80)
@@ -436,7 +435,7 @@ mod tests {
             .draw(|f| {
                 Paragraph::new(Text::from(lines))
                     .wrap(Wrap { trim: false })
-                    .render_ref(f.area(), f.buffer_mut())
+                    .render(f.area(), f.buffer_mut())
             })
             .expect("draw");
         assert_snapshot!(name, terminal.backend());
