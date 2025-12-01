@@ -1,0 +1,11 @@
+--- a/src/parser.c
++++ b/src/parser.c
+@@ -2214,7 +2214,7 @@ static TSTree *ts_parser__do_parse(
+   ts_assert(self->finished_tree.ptr);
+   if (!ts_parser__balance_subtree(self)) {
+     self->canceled_balancing = true;
+-    return false;
++    return NULL;
+   }
+   self->canceled_balancing = false;
+   LOG("done");

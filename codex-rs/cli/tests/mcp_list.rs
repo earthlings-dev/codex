@@ -12,7 +12,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::cargo_bin("codex")?;
+    let bin = std::env::var("CARGO_BIN_EXE_codex")?;
+    let mut cmd = assert_cmd::Command::new(bin);
     cmd.env("CODEX_HOME", codex_home);
     Ok(cmd)
 }

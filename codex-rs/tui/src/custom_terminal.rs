@@ -44,6 +44,30 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::widgets::WidgetRef;
 
+fn to_crossterm_color(color: Color) -> crossterm::style::Color {
+    match color {
+        Color::Reset => crossterm::style::Color::Reset,
+        Color::Black => crossterm::style::Color::Black,
+        Color::Red => crossterm::style::Color::Red,
+        Color::Green => crossterm::style::Color::Green,
+        Color::Yellow => crossterm::style::Color::Yellow,
+        Color::Blue => crossterm::style::Color::Blue,
+        Color::Magenta => crossterm::style::Color::Magenta,
+        Color::Cyan => crossterm::style::Color::Cyan,
+        Color::Gray => crossterm::style::Color::Grey,
+        Color::DarkGray => crossterm::style::Color::DarkGrey,
+        Color::LightRed => crossterm::style::Color::DarkRed,
+        Color::LightGreen => crossterm::style::Color::DarkGreen,
+        Color::LightYellow => crossterm::style::Color::DarkYellow,
+        Color::LightBlue => crossterm::style::Color::DarkBlue,
+        Color::LightMagenta => crossterm::style::Color::DarkMagenta,
+        Color::LightCyan => crossterm::style::Color::DarkCyan,
+        Color::White => crossterm::style::Color::White,
+        Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
+        Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+    }
+}
+
 #[derive(Debug, Hash)]
 pub struct Frame<'a> {
     /// Where should the cursor be after drawing this frame?
@@ -103,7 +127,7 @@ impl Frame<'_> {
 #[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 pub struct Terminal<B>
 where
-    B: Backend + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     /// The backend used to interface with the terminal
     backend: B,
@@ -125,7 +149,7 @@ where
 
 impl<B> Drop for Terminal<B>
 where
-    B: Backend,
+    B: Backend<Error = io::Error>,
     B: Write,
 {
     #[allow(clippy::print_stderr)]
@@ -141,7 +165,7 @@ where
 
 impl<B> Terminal<B>
 where
-    B: Backend,
+    B: Backend<Error = io::Error>,
     B: Write,
 {
     /// Creates a new [`Terminal`] with the given [`Backend`] and [`TerminalOptions`].
@@ -495,7 +519,10 @@ where
                 if cell.fg != fg || cell.bg != bg {
                     queue!(
                         writer,
-                        SetColors(Colors::new(cell.fg.into(), cell.bg.into()))
+                        SetColors(Colors::new(
+                            to_crossterm_color(cell.fg),
+                            to_crossterm_color(cell.bg)
+                        ))
                     )?;
                     fg = cell.fg;
                     bg = cell.bg;
@@ -506,7 +533,7 @@ where
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
                 queue!(writer, SetAttribute(crossterm::style::Attribute::Reset))?;
                 modifier = Modifier::empty();
-                queue!(writer, SetBackgroundColor(clear_bg.into()))?;
+                queue!(writer, SetBackgroundColor(to_crossterm_color(clear_bg)))?;
                 bg = clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
             }

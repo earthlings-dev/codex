@@ -136,9 +136,11 @@ impl TestCodexBuilder {
         let mut config = load_default_config_for_test(home);
         config.cwd = cwd.path().to_path_buf();
         config.model_provider = model_provider;
-        if let Ok(cmd) = assert_cmd::Command::cargo_bin("codex") {
-            config.codex_linux_sandbox_exe = Some(PathBuf::from(cmd.get_program().to_os_string()));
-        }
+        let cmd = PathBuf::from(
+            std::env::var("CARGO_BIN_EXE_codex")
+                .expect("CARGO_BIN_EXE_codex should be set by cargo when running tests"),
+        );
+        config.codex_linux_sandbox_exe = Some(cmd);
 
         let mut mutators = vec![];
         swap(&mut self.config_mutators, &mut mutators);

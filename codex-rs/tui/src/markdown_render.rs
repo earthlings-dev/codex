@@ -33,8 +33,6 @@ struct MarkdownStyles {
 
 impl Default for MarkdownStyles {
     fn default() -> Self {
-        use ratatui::style::Stylize;
-
         Self {
             h1: Style::new().bold().underlined(),
             h2: Style::new().bold(),
@@ -146,6 +144,7 @@ where
             Event::End(tag) => self.end_tag(tag),
             Event::Text(text) => self.text(text),
             Event::Code(code) => self.code(code),
+            Event::InlineMath(_) | Event::DisplayMath(_) => {}
             Event::SoftBreak => self.soft_break(),
             Event::HardBreak => self.hard_break(),
             Event::Rule => {
@@ -167,7 +166,7 @@ where
         match tag {
             Tag::Paragraph => self.start_paragraph(),
             Tag::Heading { level, .. } => self.start_heading(level),
-            Tag::BlockQuote => self.start_blockquote(),
+            Tag::BlockQuote(_) => self.start_blockquote(),
             Tag::CodeBlock(kind) => {
                 let indent = match kind {
                     CodeBlockKind::Fenced(_) => None,
@@ -192,7 +191,12 @@ where
             | Tag::TableRow
             | Tag::TableCell
             | Tag::Image { .. }
-            | Tag::MetadataBlock(_) => {}
+            | Tag::MetadataBlock(_)
+            | Tag::DefinitionList
+            | Tag::DefinitionListTitle
+            | Tag::DefinitionListDefinition
+            | Tag::Superscript
+            | Tag::Subscript => {}
         }
     }
 
@@ -200,7 +204,7 @@ where
         match tag {
             TagEnd::Paragraph => self.end_paragraph(),
             TagEnd::Heading(_) => self.end_heading(),
-            TagEnd::BlockQuote => self.end_blockquote(),
+            TagEnd::BlockQuote(_) => self.end_blockquote(),
             TagEnd::CodeBlock => self.end_codeblock(),
             TagEnd::List(_) => self.end_list(),
             TagEnd::Item => {
@@ -216,7 +220,12 @@ where
             | TagEnd::TableRow
             | TagEnd::TableCell
             | TagEnd::Image
-            | TagEnd::MetadataBlock(_) => {}
+            | TagEnd::MetadataBlock(_)
+            | TagEnd::DefinitionList
+            | TagEnd::DefinitionListTitle
+            | TagEnd::DefinitionListDefinition
+            | TagEnd::Superscript
+            | TagEnd::Subscript => {}
         }
     }
 

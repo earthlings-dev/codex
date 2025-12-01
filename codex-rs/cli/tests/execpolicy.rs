@@ -19,7 +19,8 @@ prefix_rule(
 "#,
     )?;
 
-    let output = Command::cargo_bin("codex")?
+    let bin = std::env::var("CARGO_BIN_EXE_codex")?;
+    let output = Command::new(bin)
         .env("CODEX_HOME", codex_home.path())
         .args([
             "execpolicy",

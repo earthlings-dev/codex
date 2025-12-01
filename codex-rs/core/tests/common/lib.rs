@@ -8,8 +8,7 @@ use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
 use regex_lite::Regex;
 
-#[cfg(target_os = "linux")]
-use assert_cmd::cargo::cargo_bin;
+use std::path::PathBuf;
 
 pub mod responses;
 pub mod test_codex;
@@ -40,7 +39,11 @@ pub fn load_default_config_for_test(codex_home: &TempDir) -> Config {
 #[cfg(target_os = "linux")]
 fn default_test_overrides() -> ConfigOverrides {
     ConfigOverrides {
-        codex_linux_sandbox_exe: Some(cargo_bin("codex-linux-sandbox")),
+        codex_linux_sandbox_exe: Some(PathBuf::from(
+            std::env::var("CARGO_BIN_EXE_codex-linux-sandbox").expect(
+                "CARGO_BIN_EXE_codex-linux-sandbox should be set by cargo when running tests",
+            ),
+        )),
         ..ConfigOverrides::default()
     }
 }
