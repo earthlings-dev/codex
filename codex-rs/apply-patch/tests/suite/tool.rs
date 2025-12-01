@@ -1,3 +1,4 @@
+use assert_cmd::cargo;
 use assert_cmd::Command;
 use pretty_assertions::assert_eq;
 use std::fs;
@@ -5,13 +6,13 @@ use std::path::Path;
 use tempfile::tempdir;
 
 fn run_apply_patch_in_dir(dir: &Path, patch: &str) -> anyhow::Result<assert_cmd::assert::Assert> {
-    let mut cmd = Command::cargo_bin("apply_patch")?;
+    let mut cmd = cargo::cargo_bin_cmd!("apply_patch");
     cmd.current_dir(dir);
     Ok(cmd.arg(patch).assert())
 }
 
 fn apply_patch_command(dir: &Path) -> anyhow::Result<Command> {
-    let mut cmd = Command::cargo_bin("apply_patch")?;
+    let mut cmd = cargo::cargo_bin_cmd!("apply_patch");
     cmd.current_dir(dir);
     Ok(cmd)
 }

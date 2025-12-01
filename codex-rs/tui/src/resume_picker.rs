@@ -711,10 +711,7 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
         .areas(area);
 
         // Header
-        frame.render_widget_ref(
-            Line::from(vec!["Resume a previous session".bold().cyan()]),
-            header,
-        );
+        frame.render_widget_ref(&Line::from(vec!["Resume a previous session".bold().cyan()]), header);
 
         // Search line
         let q = if state.query.is_empty() {
@@ -722,7 +719,7 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
         } else {
             format!("Search: {}", state.query)
         };
-        frame.render_widget_ref(Line::from(q), search);
+        frame.render_widget_ref(&Line::from(q), search);
 
         let metrics = calculate_column_metrics(&state.filtered_rows, state.show_all);
 
@@ -747,7 +744,7 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
             " to browse".dim(),
         ]
         .into();
-        frame.render_widget_ref(hint_line, hint);
+        frame.render_widget_ref(&hint_line, hint);
     })
 }
 
@@ -764,7 +761,7 @@ fn render_list(
     let rows = &state.filtered_rows;
     if rows.is_empty() {
         let message = render_empty_state_line(state);
-        frame.render_widget_ref(message, area);
+        frame.render_widget_ref(&message, area);
         return;
     }
 
@@ -856,14 +853,14 @@ fn render_list(
 
         let line: Line = spans.into();
         let rect = Rect::new(area.x, y, area.width, 1);
-        frame.render_widget_ref(line, rect);
+        frame.render_widget_ref(&line, rect);
         y = y.saturating_add(1);
     }
 
     if state.pagination.loading.is_pending() && y < area.y.saturating_add(area.height) {
         let loading_line: Line = vec!["  ".into(), "Loading older sessions…".italic().dim()].into();
         let rect = Rect::new(area.x, y, area.width, 1);
-        frame.render_widget_ref(loading_line, rect);
+        frame.render_widget_ref(&loading_line, rect);
     }
 }
 
@@ -976,7 +973,7 @@ fn render_column_headers(
         spans.push("  ".into());
     }
     spans.push("Conversation".bold());
-    frame.render_widget_ref(Line::from(spans), area);
+    frame.render_widget_ref(&Line::from(spans), area);
 }
 
 struct ColumnMetrics {
