@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 
-use schemars::{JsonSchema, Schema, SchemaGenerator};
+use schemars::JsonSchema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Serialize;
 use ts_rs::TS;

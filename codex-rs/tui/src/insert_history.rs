@@ -46,7 +46,6 @@ fn to_crossterm_color(color: Color) -> CColor {
     }
 }
 
-
 /// Insert `lines` above the viewport using the terminal's backend writer
 /// (avoids direct stdout references).
 pub fn insert_history_lines<B>(

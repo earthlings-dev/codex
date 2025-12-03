@@ -1,9 +1,9 @@
 use assert_cmd::Command as AssertCommand;
-use std::env;
 use codex_core::RolloutRecorder;
 use codex_core::protocol::GitInfo;
 use core_test_support::fs_wait;
 use core_test_support::skip_if_no_network;
+use std::env;
 use std::time::Duration;
 use tempfile::TempDir;
 use uuid::Uuid;

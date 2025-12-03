@@ -10,11 +10,11 @@ use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
-use ratatui::widgets::Widget;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::StatefulWidgetRef;
+use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 
 use super::chat_composer_history::ChatComposerHistory;

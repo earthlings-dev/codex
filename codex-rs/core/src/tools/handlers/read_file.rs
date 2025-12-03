@@ -466,8 +466,6 @@ mod defaults {
         }
     }
 
-    
-
     pub fn offset() -> usize {
         1
     }
