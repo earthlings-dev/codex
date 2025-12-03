@@ -11,6 +11,8 @@ use tokio::process::Child;
 use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 
+use anyhow::Context;
+use anyhow::anyhow;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::ArchiveConversationParams;
 use codex_app_server_protocol::CancelLoginAccountParams;
@@ -49,8 +51,6 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnStartParams;
 use tokio::process::Command;
-use anyhow::anyhow;
-use anyhow::Context;
 
 pub struct McpProcess {
     next_request_id: AtomicI64,
@@ -87,10 +87,9 @@ impl McpProcess {
                     .ancestors()
                     .nth(3)
                     .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")));
-                let candidate = workspace_dir.join("target/debug").join(format!(
-                    "codex-app-server{}",
-                    std::env::consts::EXE_SUFFIX
-                ));
+                let candidate = workspace_dir
+                    .join("target/debug")
+                    .join(format!("codex-app-server{}", std::env::consts::EXE_SUFFIX));
                 candidate
                     .exists()
                     .then_some(candidate)

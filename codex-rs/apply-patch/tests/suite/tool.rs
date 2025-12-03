@@ -1,5 +1,5 @@
-use assert_cmd::cargo;
 use assert_cmd::Command;
+use assert_cmd::cargo;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::path::Path;

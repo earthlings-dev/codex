@@ -16,8 +16,7 @@ fn test_apply_patch_cli_add_and_update() -> anyhow::Result<()> {
 *** End Patch"#
     );
     let mut cmd = cargo::cargo_bin_cmd!("apply_patch");
-    cmd
-        .arg(add_patch)
+    cmd.arg(add_patch)
         .current_dir(tmp.path())
         .assert()
         .success()
@@ -34,8 +33,7 @@ fn test_apply_patch_cli_add_and_update() -> anyhow::Result<()> {
 *** End Patch"#
     );
     let mut cmd = cargo::cargo_bin_cmd!("apply_patch");
-    cmd
-        .arg(update_patch)
+    cmd.arg(update_patch)
         .current_dir(tmp.path())
         .assert()
         .success()
