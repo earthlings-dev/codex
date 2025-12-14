@@ -62,7 +62,7 @@ shlex = { workspace = true }
 similar = { workspace = true }
 strum_macros = { workspace = true }
 tempfile = { workspace = true }
-test-case = "3.3.1"
+test-case = { workspace = true }
 test-log = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true, features = [
@@ -100,7 +100,7 @@ landlock = { workspace = true }
 seccompiler = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.9"
+core-foundation = { workspace = true }
 keyring = { workspace = true, features = ["apple-native"] }
 
 # Build OpenSSL from source for musl builds.

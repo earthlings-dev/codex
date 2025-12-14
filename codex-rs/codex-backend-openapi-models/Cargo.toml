@@ -14,9 +14,9 @@ path = "src/lib.rs"
 # Lint overrides are applied in src/lib.rs via crate attributes
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_with = "3"
+serde = { features = ["derive"] , workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
 
 [package.metadata.cargo-shear]
 ignored = ["serde_with"]

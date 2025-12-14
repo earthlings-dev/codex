@@ -8,7 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 axum = { workspace = true, default-features = false, features = [
     "http1",
     "tokio",
@@ -19,12 +19,12 @@ dirs = { workspace = true }
 futures = { workspace = true, default-features = false, features = ["std"] }
 keyring = { workspace = true, features = ["crypto-rust"] }
 mcp-types = { path = "../mcp-types" }
-oauth2 = "5"
-reqwest = { version = "0.12", default-features = false, features = [
+oauth2 = { workspace = true }
+reqwest = { features = [
     "json",
     "stream",
     "rustls-tls",
-] }
+] , workspace = true }
 rmcp = { workspace = true, default-features = false, features = [
     "auth",
     "base64",
