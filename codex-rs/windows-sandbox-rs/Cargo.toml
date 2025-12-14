@@ -18,27 +18,26 @@ name = "codex-command-runner"
 path = "src/bin/command_runner.rs"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 base64 = { workspace = true }
-dunce = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
-windows = { version = "0.58", features = [
+dunce = { workspace = true }
+serde = { features = ["derive"] , workspace = true }
+serde_json = { workspace = true }
+chrono = { features = ["clock", "std"] , workspace = true }
+windows = { features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_WindowsFirewall",
     "Win32_System_Com",
     "Win32_System_Variant",
-] }
+] , workspace = true }
 [dependencies.codex-protocol]
 package = "codex-protocol"
 path = "../protocol"
 [dependencies.rand]
-default-features = false
 features = ["std", "small_rng"]
-version = "0.8"
+workspace = true
 [dependencies.dirs-next]
-version = "2.0"
+workspace = true
 [dependencies.windows-sys]
 features = [
     "Win32_Foundation",
@@ -66,9 +65,9 @@ features = [
     "Win32_UI_Shell",
     "Win32_System_Registry",
 ]
-version = "0.52"
+workspace = true
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [build-dependencies]
-winres = "0.1"
+winres = { workspace = true }

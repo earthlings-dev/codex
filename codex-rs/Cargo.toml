@@ -106,29 +106,29 @@ mcp_test_support = { path = "mcp-server/tests/common" }
 
 # External
 allocative = "0.3.3"
-ansi-to-tui = "7.0.0"
-anyhow = "1"
+ansi-to-tui = "8.0.0-beta.0"
+anyhow = { version = "1" }
 arboard = { version = "3", features = ["wayland-data-control"] }
 assert_cmd = "2"
 assert_matches = "1.5.0"
 async-channel = "2.3.1"
 async-stream = "0.3.6"
-async-trait = "0.1.89"
+async-trait = { version = "0.1.89" }
 axum = { version = "0.8", default-features = false }
 base64 = "0.22.1"
 bytes = "1.10.1"
 chardetng = "0.1.17"
-chrono = "0.4.42"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "serde", "std"] }
 clap = "4"
 clap_complete = "4"
 color-eyre = "0.6.3"
 crossterm = "0.28.1"
 ctor = "0.5.0"
 derive_more = "2"
-diffy = "0.4.2"
+diffy = { version = "0.4.2" }
 dirs = "6"
 dotenvy = "0.15.7"
-dunce = "1.0.4"
+dunce = { version = "1.0.4" }
 encoding_rs = "0.8.35"
 env-flags = "0.1.1"
 env_logger = "0.11.5"
@@ -168,21 +168,21 @@ path-absolutize = "3.1.1"
 pathdiff = "0.2"
 portable-pty = "0.9.0"
 predicates = "3"
-pretty_assertions = "1.4.1"
+pretty_assertions = { version = "1.4.1" }
 pulldown-cmark = "0.10"
-rand = "0.9"
-ratatui = "0.29.0"
-ratatui-macros = "0.6.0"
-regex = "1.12.2"
+rand = { version = "0.9", default-features = false, features = ["small_rng", "std"] }
+ratatui = "0.30.0-alpha.0"
+ratatui-macros = "0.7.0-alpha.0"
+regex = { version = "1.12.2" }
 regex-lite = "0.1.7"
-reqwest = "0.12"
+reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream"], default-features = false }
 rmcp = { version = "0.10.0", default-features = false }
 schemars = "0.8.22"
 seccompiler = "0.5.0"
-sentry = "0.34.0"
-serde = "1"
-serde_json = "1"
-serde_with = "3.16"
+sentry = { version = "0.34.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+serde_with = { version = "3.16" }
 serde_yaml = "0.9"
 serial_test = "3.2.0"
 sha1 = "0.10.6"
@@ -195,20 +195,20 @@ strum = "0.27.2"
 strum_macros = "0.27.2"
 supports-color = "3.0.2"
 sys-locale = "0.3.2"
-tempfile = "3.23.0"
+tempfile = { version = "3.23.0" }
 test-log = "0.2.18"
 textwrap = "0.16.2"
-thiserror = "2.0.17"
+thiserror = { version = "2.0.17" }
 time = "0.3"
 tiny_http = "0.12"
-tokio = "1"
+tokio = { version = "1", features = ["full", "rt"] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4"
 tokio-util = "0.7.16"
 toml = "0.9.5"
 toml_edit = "0.23.5"
 tonic = "0.13.1"
-tracing = "0.1.43"
+tracing = { version = "0.1.43", features = ["log"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = "0.3.20"
 tracing-test = "0.2.5"
@@ -225,11 +225,21 @@ uuid = "1"
 vt100 = "0.16.2"
 walkdir = "2.5.0"
 webbrowser = "1.0"
-which = "6"
+which = { version = "6" }
 wildmatch = "2.6.1"
 
-wiremock = "0.6"
+wiremock = { version = "0.6" }
 zeroize = "1.8.2"
+test-case = { version = "3.3.1" }
+core-foundation = { version = "0.9" }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_NetworkManagement_WindowsFirewall", "Win32_System_Com", "Win32_System_Variant"] }
+dirs-next = { version = "2.0" }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_SystemServices", "Win32_System_Environment", "Win32_System_Pipes", "Win32_System_WindowsProgramming", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Kernel", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_NetworkManagement_NetManagement", "Win32_Networking_WinSock", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_Security_Cryptography", "Win32_Security_Authentication_Identity", "Win32_UI_Shell", "Win32_System_Registry"] }
+winres = { version = "0.1" }
+filedescriptor = { version = "0.8.3" }
+shared_library = { version = "0.1.9" }
+winapi = { version = "0.3.9", features = ["handleapi", "minwinbase", "processthreadsapi", "synchapi", "winbase", "wincon", "winerror", "winnt"] }
+oauth2 = { version = "5" }
 
 [workspace.lints]
 rust = {}
@@ -291,8 +301,16 @@ opt-level = 0
 [patch.crates-io]
 # Uncomment to debug local changes.
 # ratatui = { path = "../../ratatui" }
-crossterm = { git = "https://github.com/nornagon/crossterm", branch = "nornagon/color-query" }
-ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
+# crossterm = { git = "https://github.com/nornagon/crossterm", branch = "nornagon/color-query" }
+# ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
+crossterm = { git = "https://github.com/takumi-earth/crossterm", branch = "master" }
+ratatui = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-core = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-widgets = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-crossterm = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-termion = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-termwiz = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
+ratatui-macros = { git = "https://github.com/takumi-earth/ratatui", branch = "main" }
 
 # Uncomment to debug local changes.
 # rmcp = { path = "../../rust-sdk/crates/rmcp" }

@@ -369,9 +369,9 @@ mod tests {
         let shell_path = bash_shell.shell_path;
 
         assert!(
-            shell_path == PathBuf::from("/bin/bash")
-                || shell_path == PathBuf::from("/usr/bin/bash")
-                || shell_path == PathBuf::from("/usr/local/bin/bash"),
+            *shell_path == *"/bin/bash"
+                || *shell_path == *"/usr/bin/bash"
+                || *shell_path == *"/usr/local/bin/bash",
             "shell path: {shell_path:?}",
         );
     }
@@ -381,7 +381,7 @@ mod tests {
         let sh_shell = get_shell(ShellType::Sh, None).unwrap();
         let shell_path = sh_shell.shell_path;
         assert!(
-            shell_path == PathBuf::from("/bin/sh") || shell_path == PathBuf::from("/usr/bin/sh"),
+            *shell_path == *"/bin/sh" || *shell_path == *"/usr/bin/sh",
             "shell path: {shell_path:?}",
         );
     }
