@@ -1360,7 +1360,6 @@ pub enum ExecCommandSource {
     UnifiedExecInteraction,
 }
 
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ExecCommandBeginEvent {
     /// Identifier so this can be paired with the ExecCommandEnd event.

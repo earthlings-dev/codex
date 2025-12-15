@@ -230,7 +230,7 @@ mod tests {
 
         let mut terminal = Terminal::new(VT100Backend::new(70, 14)).expect("terminal");
         terminal
-            .draw(|f| (&widget).render_ref(f.area(), f.buffer_mut()))
+            .draw(|f: &mut ratatui::Frame<'_>| (&widget).render_ref(f.area(), f.buffer_mut()))
             .expect("draw");
 
         insta::assert_snapshot!(terminal.backend());

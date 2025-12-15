@@ -1047,7 +1047,7 @@ dependencies = [
  "codex-core",
  "codex-login",
  "codex-tui",
- "crossterm 0.28.1",
+ "crossterm",
  "owo-colors",
  "pretty_assertions",
  "ratatui",
@@ -1554,7 +1554,7 @@ dependencies = [
  "codex-protocol",
  "codex-windows-sandbox",
  "color-eyre",
- "crossterm 0.28.1",
+ "crossterm",
  "derive_more 2.1.0",
  "diffy",
  "dirs",
@@ -1623,7 +1623,7 @@ dependencies = [
  "codex-tui",
  "codex-windows-sandbox",
  "color-eyre",
- "crossterm 0.28.1",
+ "crossterm",
  "derive_more 2.1.0",
  "diffy",
  "dirs",
@@ -1951,29 +1951,13 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crossterm"
-version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
-dependencies = [
- "bitflags 2.10.0",
- "crossterm_winapi",
- "futures-core",
- "mio",
- "parking_lot",
- "rustix 0.38.44",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm"
 version = "0.29.2"
 source = "git+https://github.com/takumi-earth/crossterm?branch=master#4874bdfb8b860b7ea1bd294b4734bb2f31a09f46"
 dependencies = [
  "bitflags 2.10.0",
  "crossterm_winapi",
  "derive_more 2.1.0",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix 1.1.2",
@@ -5408,7 +5392,7 @@ version = "0.1.0-beta.0"
 source = "git+https://github.com/takumi-earth/ratatui?branch=main#c5a6ea321fb6ca9ee55717d02b2b026315b21929"
 dependencies = [
  "cfg-if",
- "crossterm 0.29.2",
+ "crossterm",
  "instability",
  "ratatui-core",
 ]
