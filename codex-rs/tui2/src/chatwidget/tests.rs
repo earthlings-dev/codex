@@ -2166,7 +2166,7 @@ fn approval_modal_exec_without_reason_snapshot() {
         ratatui::Terminal::new(VT100Backend::new(width, height)).expect("create terminal");
     terminal.set_viewport_area(Rect::new(0, 0, width, height));
     terminal
-        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .draw(|f: &mut ratatui::Frame<'_>| chat.render(f.area(), f.buffer_mut()))
         .expect("draw approval modal (no reason)");
     assert_snapshot!(
         "approval_modal_exec_no_reason",
@@ -2206,7 +2206,7 @@ fn approval_modal_patch_snapshot() {
         ratatui::Terminal::new(VT100Backend::new(80, height)).expect("create terminal");
     terminal.set_viewport_area(Rect::new(0, 0, 80, height));
     terminal
-        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .draw(|f: &mut ratatui::Frame<'_>| chat.render(f.area(), f.buffer_mut()))
         .expect("draw patch approval modal");
     assert_snapshot!(
         "approval_modal_patch",

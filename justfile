@@ -29,13 +29,13 @@ app-server-test-client *args:
 
 # format code
 fmt:
-    cargo fmt -- --config imports_granularity=Item
+    cargo +nightly fmt -- --config imports_granularity=Item
 
 fix *args:
-    cargo clippy --fix --all-features --tests --allow-dirty "$@"
+    cargo clippy --fix --all-features --all-targets --tests --allow-dirty "$@"
 
 clippy:
-    cargo clippy --all-features --tests "$@"
+    cargo clippy --all-features --all-targets --tests "$@"
 
 install:
     rustup show active-toolchain
