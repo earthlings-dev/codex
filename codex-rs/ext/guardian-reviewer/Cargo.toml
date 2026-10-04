@@ -32,5 +32,5 @@ tracing = { workspace = true }
 [dev-dependencies]
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["experimental_metrics_custom_reader", "metrics"] }
-test-case = "3.3.1"
+test-case = "3.4.0"
 pretty_assertions = { workspace = true }

@@ -9,7 +9,7 @@ bytes = { workspace = true }
 codex-utils-rustls-provider = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
-http-body = "1.0.1"
+http-body = "1.1.0"
 httpdate = { workspace = true }
 native-tls = "0.2"
 opentelemetry = { workspace = true }
@@ -31,7 +31,7 @@ zstd = { workspace = true }
 system-configuration = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-rustls-platform-verifier = "0.7.0"
+rustls-platform-verifier = "0.7.1"
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Networking_WinHttp",
