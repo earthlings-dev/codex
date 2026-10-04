@@ -5,11 +5,10 @@ use crate::state::NetworkProxyState;
 use codex_utils_rustls_provider::ensure_rustls_crypto_provider;
 use rama_core::Layer;
 use rama_core::Service;
-use rama_core::error::BoxError;
 use rama_core::error::ErrorExt as _;
-use rama_core::error::OpaqueError;
-use rama_core::extensions::ExtensionsMut;
+use rama_core::error::extra::OpaqueError;
 use rama_core::extensions::ExtensionsRef;
+use rama_core::rt::Executor;
 use rama_core::service::BoxService;
 use rama_http::Body;
 use rama_http::Request;
@@ -19,15 +18,17 @@ use rama_http::layer::version_adapter::RequestVersionAdapter;
 use rama_http_backend::client::HttpClientService;
 use rama_http_backend::client::HttpConnector;
 use rama_http_backend::client::proxy::layer::HttpProxyConnectorLayer;
+use rama_net::ConnectorTargetInputExt;
+use rama_net::ProtocolInputExt;
 use rama_net::address::Host;
 use rama_net::address::HostWithPort;
 use rama_net::address::ProxyAddress;
 use rama_net::client::EstablishedClientConnection;
-use rama_net::http::RequestContext;
-use rama_tls_rustls::client::TlsConnectorDataBuilder;
+use rama_tls_rustls::client::RustlsClientConfigExt;
 use rama_tls_rustls::client::TlsConnectorLayer;
 use rama_tls_rustls::client::client_root_certs;
 use rama_tls_rustls::dep::rustls;
+use rama_tls_rustls::types::client::TlsClientConfig;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
@@ -120,7 +121,7 @@ pub(crate) struct UpstreamClient {
     connector: BoxService<
         Request<Body>,
         EstablishedClientConnection<HttpClientService<Body>, Request<Body>>,
-        BoxError,
+        OpaqueError,
     >,
     proxy_config: ProxyConfig,
 }
@@ -190,17 +191,21 @@ impl Service<Request<Body>> for UpstreamClient {
     type Output = Response;
     type Error = OpaqueError;
 
-    async fn serve(&self, mut req: Request<Body>) -> Result<Self::Output, Self::Error> {
-        let request_context = RequestContext::try_from(&req).ok();
-        let authority = request_context
+    async fn serve(&self, req: Request<Body>) -> Result<Self::Output, Self::Error> {
+        let connector_target = req.connector_target();
+        let authority = connector_target
             .as_ref()
-            .map(|ctx| ctx.host_with_port().to_string())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "<unknown>".to_string());
-        let proxy = request_context.as_ref().map_or_else(
+        let proxy = connector_target.as_ref().map_or_else(
             || self.proxy_config.proxy_for_protocol(/*is_secure*/ false),
-            |ctx| {
-                self.proxy_config
-                    .proxy_for_target(&ctx.host_with_port(), ctx.protocol.is_secure())
+            |target| {
+                self.proxy_config.proxy_for_target(
+                    target,
+                    req.protocol()
+                        .map(rama_net::Protocol::is_secure)
+                        .unwrap_or(false),
+                )
             },
         );
         match proxy.as_ref() {
@@ -211,12 +216,12 @@ impl Service<Request<Body>> for UpstreamClient {
             None => info!("HTTP upstream route selected (target={authority}, route=direct)"),
         }
         if let Some(proxy) = proxy {
-            req.extensions_mut().insert(proxy);
+            req.extensions().insert(proxy);
         }
 
         let connect_started_at = Instant::now();
         let EstablishedClientConnection {
-            input: mut req,
+            input: req,
             conn: http_connection,
         } = match self.connector.serve(req).await {
             Ok(connection) => {
@@ -231,12 +236,11 @@ impl Service<Request<Body>> for UpstreamClient {
                     "HTTP upstream connection failed (target={authority}, elapsed_ms={})",
                     connect_started_at.elapsed().as_millis()
                 );
-                return Err(OpaqueError::from_boxed(err));
+                return Err(err);
             }
         };
 
-        req.extensions_mut()
-            .extend(http_connection.extensions().clone());
+        req.extensions().extend(http_connection.extensions());
 
         let request_started_at = Instant::now();
         match http_connection.serve(req).await {
@@ -252,7 +256,7 @@ impl Service<Request<Body>> for UpstreamClient {
                     "HTTP upstream response headers failed (target={authority}, elapsed_ms={})",
                     request_started_at.elapsed().as_millis()
                 );
-                Err(OpaqueError::from_boxed(err).context("HTTP upstream request failed"))
+                Err(err.context("HTTP upstream request failed").into_opaque_error())
             }
         }
     }
@@ -264,22 +268,28 @@ fn build_http_connector(
 ) -> BoxService<
     Request<Body>,
     EstablishedClientConnection<HttpClientService<Body>, Request<Body>>,
-    BoxError,
+    OpaqueError,
 > {
     ensure_rustls_crypto_provider();
     let proxy = HttpProxyConnectorLayer::optional().into_layer(transport);
-    let client_config = rustls::ClientConfig::builder_with_protocol_versions(rustls::ALL_VERSIONS)
-        .with_root_certificates(tls_root_store)
-        .with_no_client_auth();
-    let tls_config = TlsConnectorDataBuilder::from(client_config)
-        .with_alpn_protocols_http_auto()
-        .build();
+    let tls_config = tls_client_config(tls_root_store);
     let tls = TlsConnectorLayer::auto()
-        .with_connector_data(tls_config)
+        .with_base_config(tls_config)
         .into_layer(proxy);
     let tls = RequestVersionAdapter::new(tls).with_default_version(Version::HTTP_11);
-    let connector = HttpConnector::new(tls);
+    let connector = HttpConnector::new(tls, Executor::default());
     connector.boxed()
+}
+
+fn tls_client_config(tls_root_store: Arc<rustls::RootCertStore>) -> TlsClientConfig {
+    TlsClientConfig::new()
+        .with_alpn_http_auto()
+        .with_modify_rustls_config(move |mut config| {
+            let verifier =
+                rustls::client::WebPkiServerVerifier::builder(tls_root_store.clone()).build()?;
+            config.dangerous().set_certificate_verifier(verifier);
+            Ok(config)
+        })
 }
 
 #[cfg(test)]
@@ -292,9 +302,9 @@ fn build_unix_connector(
 ) -> BoxService<
     Request<Body>,
     EstablishedClientConnection<HttpClientService<Body>, Request<Body>>,
-    BoxError,
+    OpaqueError,
 > {
     let transport = UnixConnector::fixed(path);
-    let connector = HttpConnector::new(transport);
+    let connector = HttpConnector::new(transport, Executor::default());
     connector.boxed()
 }

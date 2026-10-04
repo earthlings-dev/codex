@@ -403,6 +403,8 @@ impl NetworkMode {
     }
 }
 
+impl rama_core::extensions::Extension for NetworkMode {}
+
 fn default_proxy_url() -> String {
     "http://127.0.0.1:3128".to_string()
 }

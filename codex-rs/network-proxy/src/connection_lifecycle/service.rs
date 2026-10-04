@@ -4,6 +4,12 @@ use rama_core::Service;
 use rama_core::extensions::ExtensionsRef;
 use rama_core::rt::Executor;
 
+/// Carries the proxy scope through connection, request, and upgrade extensions.
+#[derive(Clone, Debug)]
+pub(crate) struct ConnectionExecutor(pub(crate) Executor);
+
+impl rama_core::extensions::Extension for ConnectionExecutor {}
+
 #[derive(Clone)]
 pub(crate) struct CancelOnShutdown<S> {
     inner: S,
@@ -26,8 +32,8 @@ where
     async fn serve(&self, request: Request) -> Result<(), Self::Error> {
         let guard = request
             .extensions()
-            .get::<Executor>()
-            .and_then(Executor::guard)
+            .get_ref::<ConnectionExecutor>()
+            .and_then(|executor| executor.0.guard())
             .cloned();
         match guard {
             Some(guard) => {

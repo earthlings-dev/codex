@@ -130,6 +130,7 @@ use codex_app_server_protocol::TurnSteerParams;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
+use codex_config::types::AppToolApproval;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::approvals::GuardianAssessmentEvent;
@@ -487,6 +488,9 @@ impl AppServerSession {
                 app_event_tx,
                 status_updates,
                 managed_requirement,
+                config
+                    .tui_peer_message_approval_mode
+                    .unwrap_or(AppToolApproval::Prompt),
             )
             .await?,
         ));

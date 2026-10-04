@@ -155,7 +155,7 @@ members = [
     "plugin",
     "model-provider",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version = "0.160.0"
@@ -339,8 +339,8 @@ aws-smithy-types = { version = "1", features = ["http-body-1-x"] }
 aws-types = "1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22.1"
-bitflags = "2.13.1"
-blake3 = "1.8.2"
+bitflags = "2.13.2"
+blake3 = "=1.8.2"
 bm25 = "2.3.2"
 bytes = "1.10.1"
 caseless = "0.2.2"
@@ -505,7 +505,7 @@ test-log = "0.2.19"
 textwrap = "0.16.2"
 thiserror = "2.0.17"
 tikv-jemallocator = "=0.7.0"
-time = "0.3.47"
+time = "=0.3.47"
 tiny_http = "0.12"
 tokio = "1"
 tokio-rustls = "0.26.4"
@@ -546,6 +546,7 @@ wildmatch = "2.6.1"
 winapi-util = "0.1.11"
 zip = "2.4.2"
 zstd = "0.13"
+zune-core = "=0.5.1"
 
 wiremock = "0.6"
 zeroize = "1.8.2"

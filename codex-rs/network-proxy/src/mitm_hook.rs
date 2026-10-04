@@ -392,8 +392,10 @@ fn hook_matches(hook: &MitmHook, req: &Request) -> bool {
         return false;
     }
 
-    let path = req.uri().path();
-    if !is_safe_for_authorization(path) || !path_matches(&hook.matcher.path_prefixes, path) {
+    let path = req.uri().path_ref_or_root().as_encoded_str();
+    if !is_safe_for_authorization(path.as_ref())
+        || !path_matches(&hook.matcher.path_prefixes, path.as_ref())
+    {
         return false;
     }
 
@@ -409,9 +411,13 @@ fn query_matches(query_constraints: &[QueryConstraint], req: &Request) -> bool {
         return true;
     }
 
-    let actual_query = req.uri().query().unwrap_or_default();
+    let actual_query = req
+        .uri()
+        .query()
+        .map(rama_net::uri::QueryRef::as_encoded_str)
+        .unwrap_or_default();
     let mut actual_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (name, value) in form_urlencoded::parse(actual_query.as_bytes()) {
+    for (name, value) in form_urlencoded::parse(actual_query.as_ref().as_bytes()) {
         actual_values
             .entry(name.into_owned())
             .or_default()
@@ -482,7 +488,11 @@ fn compile_path_matchers(path_prefixes: &[String]) -> Result<Vec<PathMatcher>> {
                     if prefix.is_empty() {
                         return Err(anyhow!("path_prefixes must not contain empty entries"));
                     }
-                    Ok(PathMatcher::Prefix(prefix.to_string()))
+                    Ok(PathMatcher::Prefix(
+                        rama_net::uri::PathRef::from_raw_str(prefix)
+                            .as_encoded_str()
+                            .into_owned(),
+                    ))
                 }
                 MatcherPattern::Glob(glob_pattern) => Ok(PathMatcher::Glob(compile_glob_matcher(
                     glob_pattern,

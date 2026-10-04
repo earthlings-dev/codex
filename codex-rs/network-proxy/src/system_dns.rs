@@ -5,7 +5,13 @@
 //! breaks Codex's ability to interact with network paths
 //! that are provided by applications that modify / hook
 //! into macOS DNS behavior (i.e. proxies, VPNs, etc)
-use rama_dns::DnsResolver;
+use rama_core::bytes::Bytes;
+use rama_core::futures::Stream;
+use rama_core::futures::TryStreamExt as _;
+use rama_core::futures::stream;
+use rama_dns::client::resolver::DnsAddressResolver;
+use rama_dns::client::resolver::DnsResolver;
+use rama_dns::client::resolver::DnsTxtResolver;
 use rama_net::address::Domain;
 use std::io;
 use std::net::IpAddr;
@@ -18,38 +24,55 @@ use tokio::net::lookup_host;
 #[derive(Clone)]
 pub(crate) struct SystemDnsResolver;
 
-impl DnsResolver for SystemDnsResolver {
+impl DnsAddressResolver for SystemDnsResolver {
     type Error = io::Error;
 
-    async fn ipv4_lookup(&self, domain: Domain) -> io::Result<Vec<Ipv4Addr>> {
-        Ok(lookup_host((domain.as_str(), 0))
-            .await?
-            .filter_map(|addr| match addr.ip() {
-                IpAddr::V4(ip) => Some(ip),
+    fn lookup_ipv4(
+        &self,
+        domain: Domain,
+    ) -> impl Stream<Item = io::Result<Ipv4Addr>> + Send + '_ {
+        stream::once(async move {
+            let addresses = lookup_host((domain.as_str().to_owned(), 0)).await?;
+            Ok::<_, io::Error>(stream::iter(addresses.filter_map(|addr| match addr.ip() {
+                IpAddr::V4(ip) => Some(Ok(ip)),
                 IpAddr::V6(_) => None,
-            })
-            .collect())
+            })))
+        })
+        .try_flatten()
     }
 
-    async fn ipv6_lookup(&self, domain: Domain) -> io::Result<Vec<Ipv6Addr>> {
-        Ok(lookup_host((domain.as_str(), 0))
-            .await?
-            .filter_map(|addr| match addr.ip() {
+    fn lookup_ipv6(
+        &self,
+        domain: Domain,
+    ) -> impl Stream<Item = io::Result<Ipv6Addr>> + Send + '_ {
+        stream::once(async move {
+            let addresses = lookup_host((domain.as_str().to_owned(), 0)).await?;
+            Ok::<_, io::Error>(stream::iter(addresses.filter_map(|addr| match addr.ip() {
                 IpAddr::V4(_) => None,
-                IpAddr::V6(ip) => Some(ip),
-            })
-            .collect())
-    }
-
-    async fn txt_lookup(&self, _domain: Domain) -> io::Result<Vec<Vec<u8>>> {
-        // TCP connectors only need address lookups. Do not silently fall back to
-        // a resolver with different DNS routing for unsupported record types.
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "the system address resolver does not support TXT lookups",
-        ))
+                IpAddr::V6(ip) => Some(Ok(ip)),
+            })))
+        })
+        .try_flatten()
     }
 }
+
+impl DnsTxtResolver for SystemDnsResolver {
+    type Error = io::Error;
+
+    fn lookup_txt(
+        &self,
+        _domain: Domain,
+    ) -> impl Stream<Item = io::Result<Bytes>> + Send + '_ {
+        // TCP connectors only need address lookups. Do not silently fall back to
+        // a resolver with different DNS routing for unsupported record types.
+        stream::once(std::future::ready(Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the system address resolver does not support TXT lookups",
+        ))))
+    }
+}
+
+impl DnsResolver for SystemDnsResolver {}
 
 #[cfg(test)]
 #[path = "system_dns_tests.rs"]

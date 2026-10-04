@@ -1,7 +1,7 @@
 use crate::state::NetworkProxyState;
 use rama_core::Service;
 use rama_core::error::BoxError;
-use rama_core::extensions::ExtensionsMut;
+use rama_core::extensions::ExtensionsRef;
 use rama_tcp::TcpStream;
 use std::io;
 use std::io::Write;
@@ -17,6 +17,7 @@ const ATTRIBUTION_FRAME_MAGIC: &[u8; 8] = b"\0CDXPXY1";
 const MAX_ATTRIBUTION_TOKEN_LEN: usize = 128;
 const ATTRIBUTION_FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
+#[derive(Clone)]
 pub(crate) struct BindConnectionAttribution<S> {
     inner: S,
     state: Arc<NetworkProxyState>,
@@ -68,7 +69,7 @@ where
             )
             .into());
         }
-        stream.extensions_mut().insert(Arc::new(state));
+        stream.extensions().insert_arc(Arc::new(state));
         self.inner.serve(stream).await.map_err(Into::into)
     }
 }

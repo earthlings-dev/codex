@@ -38,6 +38,7 @@ use codex_config::loader::project_trust_key;
 use codex_config::permissions_toml::PermissionProfileToml;
 use codex_config::permissions_toml::PermissionsToml;
 use codex_config::sandbox_mode_requirement_for_permission_profile;
+use codex_config::types::AppToolApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::AuthKeyringBackendKind;
@@ -766,6 +767,9 @@ pub struct Config {
 
     /// TUI notification settings, including enabled events, delivery method, and focus condition.
     pub tui_notifications: TuiNotificationSettings,
+
+    /// Approval override for peer messages sent by the TUI task-tools server.
+    pub tui_peer_message_approval_mode: Option<AppToolApproval>,
 
     /// Enable ASCII animations and shimmer effects in the TUI.
     pub animations: bool,
@@ -4490,6 +4494,10 @@ impl Config {
                 .as_ref()
                 .map(|t| t.notification_settings.clone())
                 .unwrap_or_default(),
+            tui_peer_message_approval_mode: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.peer_message_approval_mode),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             tui_effects: cfg.tui.as_ref().map(|t| t.effects).unwrap_or_default(),
             tui_rendering: cfg.tui.as_ref().map(|t| t.rendering).unwrap_or_default(),

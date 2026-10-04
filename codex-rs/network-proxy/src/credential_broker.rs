@@ -1313,7 +1313,7 @@ impl CredentialBroker {
             )
         }) && let Some(request) = request.as_ref()
         {
-            let Ok(raw_request) = destination.parse::<rama_http::Uri>() else {
+            let Ok(raw_request) = destination.parse::<http::Uri>() else {
                 return;
             };
             let raw_path = raw_request.path();

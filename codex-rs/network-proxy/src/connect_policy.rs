@@ -3,16 +3,19 @@ use crate::runtime::HostBlockDecision;
 use crate::state::NetworkProxyState;
 #[cfg(target_os = "macos")]
 use crate::system_dns::SystemDnsResolver;
+use rama_core::Layer;
 use rama_core::Service;
 use rama_core::error::BoxError;
+use rama_core::error::ErrorContext as _;
 use rama_core::error::ErrorExt as _;
-use rama_core::error::OpaqueError;
-use rama_core::extensions::ExtensionsMut;
+use rama_core::error::extra::OpaqueError;
+use rama_dns::client::DnsConnectorLayer;
+use rama_net::ConnectorTargetInputExt;
+use rama_net::TransportProtocolInputExt;
 use rama_net::address::Host;
 use rama_net::address::HostWithPort;
 use rama_net::address::ProxyAddress;
 use rama_net::client::EstablishedClientConnection;
-use rama_net::transport::TryRefIntoTransportContext;
 use rama_tcp::TcpStream;
 use rama_tcp::client::TcpStreamConnector;
 use rama_tcp::client::service::TcpConnector;
@@ -33,34 +36,34 @@ impl TargetCheckedTcpConnector {
 
 impl<Input> Service<Input> for TargetCheckedTcpConnector
 where
-    Input: TryRefIntoTransportContext + Send + ExtensionsMut + 'static,
-    Input::Error: Into<BoxError> + Send + Sync + 'static,
+    Input: ConnectorTargetInputExt + TransportProtocolInputExt + Send + 'static,
 {
     type Output = EstablishedClientConnection<TcpStream, Input>;
     type Error = BoxError;
 
     async fn serve(&self, input: Input) -> Result<Self::Output, Self::Error> {
-        let connector = TcpConnector::new();
+        #[cfg(not(target_os = "macos"))]
+        let dns = DnsConnectorLayer::new();
         #[cfg(target_os = "macos")]
-        let connector = connector.with_dns(SystemDnsResolver);
+        let dns = DnsConnectorLayer::with_resolver(SystemDnsResolver);
 
-        if input.extensions().get::<ProxyAddress>().is_some() {
-            return connector.serve(input).await;
+        if input.extensions().get_ref::<ProxyAddress>().is_some() {
+            return dns.into_layer(TcpConnector::new()).serve(input).await;
         }
 
         let target = input
-            .try_ref_into_transport_ctx()
-            .map_err(|err| OpaqueError::from_boxed(err.into()).context("read network target"))?
-            .host_with_port()
-            .ok_or_else(|| OpaqueError::from_display("network target is missing a port"))?;
+            .connector_target()
+            .ok_or_else(|| OpaqueError::from_static_str("network target is missing a port"))
+            .context("read network target")?;
 
-        connector
-            .with_connector(TargetCheckedStreamConnector {
+        dns.into_layer(
+            TcpConnector::new().with_connector(TargetCheckedStreamConnector {
                 state: self.state.clone(),
                 target,
-            })
-            .serve(input)
-            .await
+            }),
+        )
+        .serve(input)
+        .await
     }
 }
 
@@ -93,9 +96,7 @@ impl TargetCheckedStreamConnector {
     async fn allows_non_public_target(&self, addr: SocketAddr) -> Result<bool, BoxError> {
         if self.state.allow_local_binding().await.map_err(|err| {
             let err: BoxError = err.into();
-            OpaqueError::from_boxed(err)
-                .context("read network proxy config")
-                .into_boxed()
+            err.context("read network proxy config")
         })? {
             return Ok(true);
         }
@@ -110,9 +111,7 @@ impl TargetCheckedStreamConnector {
             .map(|decision| decision == HostBlockDecision::Allowed)
             .map_err(|err| {
                 let err: BoxError = err.into();
-                OpaqueError::from_boxed(err)
-                    .context("evaluate network proxy target")
-                    .into_boxed()
+                err.context("evaluate network proxy target")
             })
     }
 }
@@ -124,6 +123,7 @@ pub(crate) fn is_non_public_target(host: &Host) -> bool {
             .as_str()
             .trim_end_matches('.')
             .eq_ignore_ascii_case("localhost"),
+        _ => false,
     }
 }
 
@@ -136,6 +136,7 @@ fn target_matches_non_public_addr(host: &Host, addr: std::net::IpAddr) -> bool {
                 .eq_ignore_ascii_case("localhost")
                 && addr.is_loopback()
         }
+        _ => false,
     }
 }
 
@@ -158,8 +159,8 @@ mod tests {
             NetworkProxyConfig::default(),
         )));
 
-        let request: rama_tcp::client::Request =
-            rama_tcp::client::Request::new(HostWithPort::from(target));
+        let request: rama_net::client::Request =
+            rama_net::client::Request::new(HostWithPort::from(target));
         let err = Service::serve(&connector, request)
             .await
             .expect_err("local target should be rejected");
@@ -183,8 +184,8 @@ mod tests {
             },
         )));
 
-        let request: rama_tcp::client::Request =
-            rama_tcp::client::Request::new(HostWithPort::from(target));
+        let request: rama_net::client::Request =
+            rama_net::client::Request::new(HostWithPort::from(target));
         let result = Service::serve(&connector, request).await;
 
         assert!(result.is_ok(), "local target should be allowed: {result:?}");
@@ -201,8 +202,8 @@ mod tests {
         let connector =
             TargetCheckedTcpConnector::new(Arc::new(network_proxy_state_for_policy(config)));
 
-        let request: rama_tcp::client::Request =
-            rama_tcp::client::Request::new(HostWithPort::from(target));
+        let request: rama_net::client::Request =
+            rama_net::client::Request::new(HostWithPort::from(target));
         let result = Service::serve(&connector, request).await;
 
         assert!(
@@ -222,8 +223,8 @@ mod tests {
         let connector =
             TargetCheckedTcpConnector::new(Arc::new(network_proxy_state_for_policy(config)));
 
-        let request: rama_tcp::client::Request =
-            rama_tcp::client::Request::new(HostWithPort::new(Host::LOCALHOST_NAME, target.port()));
+        let request: rama_net::client::Request =
+            rama_net::client::Request::new(HostWithPort::new(Host::LOCALHOST_NAME, target.port()));
         let result = Service::serve(&connector, request).await;
 
         assert!(

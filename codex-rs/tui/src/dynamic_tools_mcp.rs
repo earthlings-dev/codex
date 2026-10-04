@@ -21,6 +21,7 @@ use codex_app_server_protocol::ThreadStatusChangedNotification;
 use codex_config::McpServerConfig;
 use codex_config::McpServerRequirement;
 use codex_config::RawMcpServerConfig;
+use codex_config::types::AppToolApproval;
 use rmcp::ErrorData as McpError;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::CallToolRequestParams;
@@ -110,6 +111,7 @@ impl DynamicToolMcpServer {
         app_event_tx: AppEventSender,
         status_updates: broadcast::Sender<ThreadStatusChangedNotification>,
         managed_requirement: Option<&McpServerRequirement>,
+        peer_message_approval_mode: AppToolApproval,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -120,7 +122,7 @@ impl DynamicToolMcpServer {
             "default_tools_approval_mode": "approve",
             "tools": {
                 "create_thread": {"approval_mode": "prompt"},
-                "send_message_to_thread": {"approval_mode": "prompt"},
+                "send_message_to_thread": {"approval_mode": peer_message_approval_mode},
                 "fork_thread": {"approval_mode": "prompt"}
             }
         });

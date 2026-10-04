@@ -10,6 +10,10 @@ workspace = true
 [dependencies]
 rustls = { workspace = true }
 
+[build-dependencies]
+# Keep aws-lc-sys's jitter entropy CFLAGS guard effective before cc captures the environment.
+cc = "=1.2.55"
+
 [lib]
 test = false
 doctest = false

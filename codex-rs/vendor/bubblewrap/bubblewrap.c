@@ -1110,6 +1110,9 @@ privileged_op (int         privileged_op_socket,
       break;
 
     case PRIV_SEP_OP_REMOUNT_RO_NO_RECURSIVE:
+      if (arg2 == NULL)
+        die ("Remount destination is NULL");
+
       bind_result = bind_mount (proc_fd, NULL, arg2, BIND_READONLY, &failing_path);
 
       if (bind_result != BIND_MOUNT_SUCCESS)
@@ -1120,6 +1123,9 @@ privileged_op (int         privileged_op_socket,
       break;
 
     case PRIV_SEP_OP_BIND_MOUNT:
+      if (arg2 == NULL)
+        die ("Bind mount destination is NULL");
+
       /* We always bind directories recursively, otherwise this would let us
          access files that are otherwise covered on the host */
       bind_result = bind_mount (proc_fd, arg1, arg2, BIND_RECURSIVE | flags, &failing_path);
@@ -1170,6 +1176,9 @@ privileged_op (int         privileged_op_socket,
     case PRIV_SEP_OP_OVERLAY_MOUNT:
       if (is_privileged)
         die ("Overlay mounts are not supported in setuid mode");
+      if (arg2 == NULL)
+        die ("Overlay mount destination is NULL");
+
       if (mount ("overlay", arg2, "overlay", MS_MGC_VAL | MS_NOSUID | MS_NODEV, arg1) != 0)
         {
           /* The standard message for ELOOP, "Too many levels of symbolic

@@ -804,6 +804,12 @@ pub struct Tui {
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
+    /// Approval mode for messages sent to existing peer sessions.
+    ///
+    /// Defaults to `prompt`; task creation and forks keep their own approval modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_message_approval_mode: Option<AppToolApproval>,
+
     /// Enable animations (welcome screen, shimmer effects, spinners).
     /// Defaults to `true`.
     #[serde(default = "default_true")]

@@ -6,20 +6,20 @@ use rama_http::StatusCode;
 use rama_http::Version;
 use rama_net::address::Host;
 use rama_net::address::HostWithPort;
-use rama_tls_rustls::dep::pki_types::CertificateDer;
-use rama_tls_rustls::dep::pki_types::PrivateKeyDer;
-use rama_tls_rustls::dep::pki_types::pem::PemObject;
-use rama_tls_rustls::dep::rcgen::BasicConstraints;
-use rama_tls_rustls::dep::rcgen::CertificateParams;
-use rama_tls_rustls::dep::rcgen::DistinguishedName;
-use rama_tls_rustls::dep::rcgen::DnType;
-use rama_tls_rustls::dep::rcgen::ExtendedKeyUsagePurpose;
-use rama_tls_rustls::dep::rcgen::IsCa;
-use rama_tls_rustls::dep::rcgen::Issuer;
-use rama_tls_rustls::dep::rcgen::KeyPair;
-use rama_tls_rustls::dep::rcgen::KeyUsagePurpose;
-use rama_tls_rustls::dep::rcgen::PKCS_ECDSA_P256_SHA256;
 use rama_tls_rustls::dep::tokio_rustls::TlsAcceptor;
+use rcgen::BasicConstraints;
+use rcgen::CertificateParams;
+use rcgen::DistinguishedName;
+use rcgen::DnType;
+use rcgen::ExtendedKeyUsagePurpose;
+use rcgen::IsCa;
+use rcgen::Issuer;
+use rcgen::KeyPair;
+use rcgen::KeyUsagePurpose;
+use rcgen::PKCS_ECDSA_P256_SHA256;
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::PrivateKeyDer;
+use rustls_pki_types::pem::PemObject;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
-fn generate_ca(common_name: &str) -> (String, KeyPair) {
+fn generate_ca(common_name: &str) -> (String, Issuer<'static, KeyPair>) {
     let mut params = CertificateParams::default();
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![
@@ -41,7 +41,7 @@ fn generate_ca(common_name: &str) -> (String, KeyPair) {
     params.distinguished_name = distinguished_name;
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
     let cert = params.self_signed(&key_pair).unwrap();
-    (cert.pem(), key_pair)
+    (cert.pem(), Issuer::new(params, key_pair))
 }
 
 #[tokio::test]
@@ -50,12 +50,11 @@ async fn mitm_upstream_client_trusts_startup_custom_ca() {
     let temp_dir = tempdir().unwrap();
     let startup_ca_path = temp_dir.path().join("startup-ca.pem");
     let managed_ca_path = temp_dir.path().join("managed-ca.pem");
-    let (startup_ca_pem, startup_ca_key) = generate_ca("startup CA");
+    let (startup_ca_pem, issuer) = generate_ca("startup CA");
     let (managed_ca_pem, _) = generate_ca("managed MITM CA");
     fs::write(&startup_ca_path, &startup_ca_pem).unwrap();
     fs::write(&managed_ca_path, managed_ca_pem).unwrap();
 
-    let issuer = Issuer::from_ca_cert_pem(&startup_ca_pem, startup_ca_key).unwrap();
     let mut server_params = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
     server_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
     server_params.key_usages = vec![

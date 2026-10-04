@@ -1,10 +1,10 @@
-#[cfg(any(target_os = "macos", windows))]
-use rama_tls_rustls::dep::pki_types::CertificateDer;
 use rustls_native_certs::CertificateResult;
 #[cfg(any(target_os = "macos", windows))]
 use rustls_native_certs::Error;
 #[cfg(any(target_os = "macos", windows))]
 use rustls_native_certs::ErrorKind;
+#[cfg(any(target_os = "macos", windows))]
+use rustls_pki_types::CertificateDer;
 
 // `rustls_native_certs::load_native_certs()` first consults SSL_CERT_FILE and
 // SSL_CERT_DIR. Load platform roots directly so a startup custom CA can be

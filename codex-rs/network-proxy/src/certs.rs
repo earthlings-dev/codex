@@ -4,23 +4,23 @@ use anyhow::Result;
 use anyhow::anyhow;
 use base64::Engine as _;
 use codex_utils_home_dir::find_codex_home;
-use rama_net::tls::ApplicationProtocol;
-use rama_tls_rustls::dep::pki_types::CertificateDer;
-use rama_tls_rustls::dep::pki_types::PrivateKeyDer;
-use rama_tls_rustls::dep::pki_types::pem::PemObject;
-use rama_tls_rustls::dep::rcgen::BasicConstraints;
-use rama_tls_rustls::dep::rcgen::CertificateParams;
-use rama_tls_rustls::dep::rcgen::DistinguishedName;
-use rama_tls_rustls::dep::rcgen::DnType;
-use rama_tls_rustls::dep::rcgen::ExtendedKeyUsagePurpose;
-use rama_tls_rustls::dep::rcgen::IsCa;
-use rama_tls_rustls::dep::rcgen::Issuer;
-use rama_tls_rustls::dep::rcgen::KeyPair;
-use rama_tls_rustls::dep::rcgen::KeyUsagePurpose;
-use rama_tls_rustls::dep::rcgen::PKCS_ECDSA_P256_SHA256;
-use rama_tls_rustls::dep::rcgen::SanType;
 use rama_tls_rustls::dep::rustls;
 use rama_tls_rustls::server::TlsAcceptorData;
+use rama_tls_rustls::types::ApplicationProtocol;
+use rcgen::BasicConstraints;
+use rcgen::CertificateParams;
+use rcgen::DistinguishedName;
+use rcgen::DnType;
+use rcgen::ExtendedKeyUsagePurpose;
+use rcgen::IsCa;
+use rcgen::Issuer;
+use rcgen::KeyPair;
+use rcgen::KeyUsagePurpose;
+use rcgen::PKCS_ECDSA_P256_SHA256;
+use rcgen::SanType;
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::PrivateKeyDer;
+use rustls_pki_types::pem::PemObject;
 use sha2::Digest as _;
 use sha2::Sha256;
 use std::collections::HashMap;
@@ -70,7 +70,7 @@ impl ManagedMitmCa {
         fs::create_dir_all(proxy_dir)
             .with_context(|| format!("failed to create {}", proxy_dir.display()))?;
 
-        let (certificate_pem, private_key) = generate_ca()?;
+        let ca = generate_ca()?;
         let artifact_lock = match lock_managed_ca_artifacts(proxy_dir) {
             Ok(lock) => Some(lock),
             Err(err) => {
@@ -78,9 +78,8 @@ impl ManagedMitmCa {
                 None
             }
         };
-        let certificate_path = persist_managed_ca_certificate(proxy_dir, &certificate_pem)?;
-        let issuer = Issuer::from_ca_cert_pem(&certificate_pem, private_key)
-            .context("failed to parse managed MITM CA certificate")?;
+        let certificate_path = persist_managed_ca_certificate(proxy_dir, &ca.certificate_pem)?;
+        let issuer = ca.issuer;
         let artifact_lease = lock_managed_ca_certificate(&certificate_path)?;
         if artifact_lock.is_some() {
             prune_managed_ca_artifacts(proxy_dir);
@@ -781,7 +780,14 @@ fn remove_inactive_managed_ca_certificate(certificate_path: &Path) {
     }
 }
 
-fn generate_ca() -> Result<(String, KeyPair)> {
+struct GeneratedCa {
+    certificate_pem: String,
+    issuer: Issuer<'static, KeyPair>,
+    #[cfg(test)]
+    private_key_pem: String,
+}
+
+fn generate_ca() -> Result<GeneratedCa> {
     let mut params = CertificateParams::default();
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![
@@ -795,10 +801,17 @@ fn generate_ca() -> Result<(String, KeyPair)> {
 
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
         .map_err(|err| anyhow!("failed to generate CA key pair: {err}"))?;
+    #[cfg(test)]
+    let private_key_pem = key_pair.serialize_pem();
     let cert = params
         .self_signed(&key_pair)
         .map_err(|err| anyhow!("failed to generate CA cert: {err}"))?;
-    Ok((cert.pem(), key_pair))
+    Ok(GeneratedCa {
+        certificate_pem: cert.pem(),
+        issuer: Issuer::new(params, key_pair),
+        #[cfg(test)]
+        private_key_pem,
+    })
 }
 
 fn write_atomic_create_new(path: &Path, contents: &[u8], mode: u32) -> Result<()> {
@@ -1180,10 +1193,11 @@ mod tests {
         let managed_ca_cert_path = dir.path().join("ca.pem");
         let startup_ca_bundle_path = dir.path().join("startup-ca.pem");
         let startup_ca_dir = dir.path().join("startup-certs");
-        let (managed_ca_cert, _) = generate_ca().unwrap();
-        let (startup_ca_cert, startup_ca_key) = generate_ca().unwrap();
-        let startup_ca_key = startup_ca_key.serialize_pem();
-        let (directory_ca_cert, _) = generate_ca().unwrap();
+        let managed_ca_cert = generate_ca().unwrap().certificate_pem;
+        let startup_ca = generate_ca().unwrap();
+        let startup_ca_cert = startup_ca.certificate_pem;
+        let startup_ca_key = startup_ca.private_key_pem;
+        let directory_ca_cert = generate_ca().unwrap().certificate_pem;
         let mut trusted_ca_der = CertificateDer::from_pem_slice(startup_ca_cert.as_bytes())
             .unwrap()
             .as_ref()
@@ -1233,7 +1247,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let managed_ca_cert_path = dir.path().join("ca.pem");
         let inherited_bundle_path = dir.path().join("ca-bundle-parent.pem");
-        let (managed_ca_cert, _) = generate_ca().unwrap();
+        let managed_ca_cert = generate_ca().unwrap().certificate_pem;
         fs::write(&managed_ca_cert_path, &managed_ca_cert).unwrap();
         fs::write(
             &inherited_bundle_path,

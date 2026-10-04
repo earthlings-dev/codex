@@ -63,6 +63,7 @@ impl LocalSettings {
             ),
             tui: Tui {
                 notification_settings: config.tui_notifications.clone(),
+                peer_message_approval_mode: config.tui_peer_message_approval_mode,
                 animations: animations && system_motion == crate::motion::MotionMode::Animated,
                 screen_reader_detection_done: None,
                 effects: config.tui_effects,

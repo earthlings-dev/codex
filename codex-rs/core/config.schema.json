@@ -4655,6 +4655,14 @@
           "default": true,
           "description": "Enable desktop notifications from the TUI. Defaults to `true`."
         },
+        "peer_message_approval_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppToolApproval"
+            }
+          ],
+          "description": "Approval mode for messages sent to existing peer sessions.\n\nDefaults to `prompt`; task creation and forks keep their own approval modes."
+        },
         "pet": {
           "default": null,
           "description": "Pet id to preselect in the terminal pet picker.\n\nCustom pet ids resolve against CODEX_HOME/pets/<pet-id>/pet.json.",

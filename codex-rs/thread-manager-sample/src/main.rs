@@ -281,6 +281,7 @@ async fn new_config(
         compact_prompt: None,
         notify: None,
         tui_notifications: TuiNotificationSettings::default(),
+        tui_peer_message_approval_mode: None,
         animations: true,
         tui_effects: Default::default(),
         tui_rendering: Default::default(),

@@ -19,6 +19,7 @@ use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadStatus;
+use codex_config::types::AppToolApproval;
 use codex_protocol::AgentPath;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
@@ -1078,6 +1079,22 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
 
 #[tokio::test]
 async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() -> Result<()> {
+    check_local_daemon_mcp_approval_lifecycle("", AppToolApproval::Prompt).await
+}
+
+#[tokio::test]
+async fn local_daemon_approves_peer_messages_without_approving_new_tasks() -> Result<()> {
+    check_local_daemon_mcp_approval_lifecycle(
+        "[tui]\npeer_message_approval_mode = \"approve\"\n",
+        AppToolApproval::Approve,
+    )
+    .await
+}
+
+async fn check_local_daemon_mcp_approval_lifecycle(
+    config_suffix: &str,
+    expected_peer_message_approval: AppToolApproval,
+) -> Result<()> {
     let (mut app, events, _ops) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -1087,8 +1104,13 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         .set(codex_protocol::config_types::WebSearchMode::Live)?;
     std::fs::write(
         codex_home.path().join("config.toml"),
-        "web_search = \"disabled\"\n",
+        format!("web_search = \"disabled\"\n{config_suffix}"),
     )?;
+    app.config.tui_peer_message_approval_mode = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await?
+        .tui_peer_message_approval_mode;
     // Keep the large lifecycle futures off the Windows test thread's stack.
     let (mut app_server, mut requests, mut proxy) = Box::pin(start_recording_app_server(
         &app.config,
@@ -1168,9 +1190,14 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
                 .is_some_and(|header| header.starts_with("Bearer "))
         );
         assert_eq!(server["default_tools_approval_mode"], "approve");
-        for tool in crate::dynamic_tools::DELEGATION_TOOLS {
-            assert_eq!(server["tools"][tool]["approval_mode"], "prompt");
-        }
+        assert_eq!(
+            server["tools"],
+            serde_json::json!({
+                "create_thread": {"approval_mode": "prompt"},
+                "send_message_to_thread": {"approval_mode": expected_peer_message_approval},
+                "fork_thread": {"approval_mode": "prompt"}
+            })
+        );
     }
 
     let mcp_url = starts[0]["config"]["mcp_servers.codex_tui"]["url"]

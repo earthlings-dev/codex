@@ -1257,6 +1257,7 @@ fn config_toml_deserializes_model_availability_nux() {
         cfg.tui.expect("tui config should deserialize"),
         Tui {
             notification_settings: TuiNotificationSettings::default(),
+            peer_message_approval_mode: None,
             animations: true,
             screen_reader_detection_done: None,
             effects: Default::default(),
@@ -4398,6 +4399,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
         tui,
         Tui {
             notification_settings: TuiNotificationSettings::default(),
+            peer_message_approval_mode: None,
             animations: true,
             screen_reader_detection_done: None,
             effects: Default::default(),
